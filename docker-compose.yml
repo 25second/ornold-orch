@@ -80,9 +80,10 @@ services:
   flower:
     image: mher/flower:latest
     container_name: ornold_flower
-    # Мы должны указать и брокер, и бэкенд, чтобы Flower видел статусы задач
+    # Мы должны явно указать приложение (-A) для мониторинга
     command: >
       celery 
+      -A worker.celery_app 
       --broker=redis://${REDIS_HOST}:6379/0 
       --result-backend=redis://${REDIS_HOST}:6379/0 
       flower 
