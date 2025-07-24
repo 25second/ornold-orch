@@ -130,9 +130,21 @@ class UniversalAgent:
             
             logger.info(f"Подключаюсь к WebSocket: {ws_url}")
             
-            p = await async_playwright().start()
-            self.browser = await p.chromium.connect_over_cdp(ws_url)
-            self.page = self.browser.contexts[0].pages[0]
+            try:
+                p = await async_playwright().start()
+                # Добавляем таймаут на подключение (30 секунд)
+                self.browser = await asyncio.wait_for(
+                    p.chromium.connect_over_cdp(ws_url),
+                    timeout=30.0
+                )
+                self.page = self.browser.contexts[0].pages[0]
+                logger.info(f"Успешно подключился к браузеру")
+            except asyncio.TimeoutError:
+                logger.error(f"Таймаут при подключении к WebSocket {ws_url}")
+                raise ConnectionError(f"Таймаут при подключении к браузеру через {ws_url}")
+            except Exception as e:
+                logger.error(f"Ошибка при подключении к браузеру: {e}")
+                raise ConnectionError(f"Не удалось подключиться к браузеру: {e}")
 
         logger.info(f"Агент {self.task_id} переходит по URL: {url}")
         await self.page.goto(url)
