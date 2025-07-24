@@ -120,6 +120,56 @@ class GemmaClient:
         }
         return self._run_and_poll_task(payload)
 
+    def get_next_action_universal(self, goal: str, history: list, perception: dict) -> dict:
+        """
+        Универсальный мыслительный цикл агента. Определяет следующее действие.
+        """
+        prompt = f"""
+Ты — мозг автономного универсального агента.
+Твоя главная цель: "{goal}"
+
+# Контекст
+Твоя история действий (последние 10): {history[-10:]}
+Твое текущее восприятие мира:
+{json.dumps(perception, indent=2, ensure_ascii=False)}
+
+# Доступные действия
+1.  `{{ "action": "think", "text": "...", "reasoning": "..." }}`
+    - Используй, чтобы записать свои мысли, рассуждения или составить внутренний план.
+2.  `{{ "action": "browse", "url": "...", "reasoning": "..." }}`
+    - Используй, чтобы открыть новую страницу в браузере. Если браузер еще не открыт, агент попытается его запустить.
+3.  `{{ "action": "click", "element_id": "...", "reasoning": "..." }}`
+    - Кликнуть по элементу на странице. Используй `data-ornold-id` из `marked_html`.
+4.  `{{ "action": "type", "element_id": "...", "text": "...", "reasoning": "..." }}`
+    - Напечатать текст в поле ввода.
+5.  `{{ "action": "finish", "result": "...", "reasoning": "..." }}`
+    - Используй, когда главная цель полностью достигнута. В `result` кратко опиши итог.
+
+# Задача
+Проанализируй цель, историю и восприятие. Определи **одно** следующее действие.
+Твой ответ должен быть ТОЛЬКО JSON-объектом одного из указанных выше действий. Добавь поле `reasoning` для объяснения своего выбора.
+"""
+        logger.info("Запрос к LLM для 'универсального' следующего действия...")
+        payload = {
+            "input": {
+                "prompt": prompt
+            }
+        }
+        return self._run_and_poll_task(payload)
+
+
+    def execute_prompt(self, prompt: str) -> dict:
+        """
+        Выполняет простой промпт и возвращает результат.
+        """
+        logger.info("Запрос к LLM с прямым промптом...")
+        payload = {
+            "input": {
+                "prompt": prompt
+            }
+        }
+        return self._run_and_poll_task(payload)
+
     def classify_error(self, goal: str, url: str, marked_html: str, failed_action: dict, exception_message: str) -> dict:
         """
         Анализирует контекст ошибки и предлагает стратегию восстановления.

@@ -1,6 +1,6 @@
 import shared.logging_config
 from celery import Celery
-from session_agent.agent import SessionAgent
+from universal_agent.agent import UniversalAgent # Импортируем нового агента
 import asyncio
 import os
 
@@ -14,11 +14,15 @@ celery_app = Celery(
     backend=f'redis://{REDIS_HOST}:6379/0'
 )
 
-@celery_app.task
-def run_web_agent_task(task_id: str, browser_endpoint_url: str, plan: list[str]):
+@celery_app.task(name="worker.run_agent_task")
+def run_agent_task(task_id: str, goal: str, initial_browser_endpoints: list):
     """
-    Celery-задача, которая инициализирует и запускает сессионного агента.
+    Универсальная Celery-задача, которая инициализирует и запускает агента.
     """
-    agent = SessionAgent(task_id=task_id, browser_endpoint_url=browser_endpoint_url)
-    asyncio.run(agent.run_task(plan))
-    return f"Агент для эндпоинта {browser_endpoint_url} завершил работу над задачей {task_id}." 
+    agent = UniversalAgent(
+        task_id=task_id, 
+        goal=goal,
+        initial_browser_endpoints=initial_browser_endpoints
+    )
+    asyncio.run(agent.run())
+    return f"Универсальный агент завершил работу над задачей {task_id}." 

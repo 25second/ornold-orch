@@ -3,10 +3,10 @@ from typing import List, Dict, Any, Optional
 
 class TaskCreate(BaseModel):
     goal: str
-    browser_endpoints: List[str] = Field(
-        ...,
-        description="Список URL-адресов эндпоинтов браузеров (например, от туннелей ngrok)",
-        examples=[["wss://your-tunnel-1.ngrok.io", "wss://your-tunnel-2.ngrok.io"]]
+    browser_endpoints: Optional[List[str]] = Field(
+        None,
+        description="(Опционально) Список URL-адресов эндпоинтов браузеров для предоставления агенту",
+        examples=[["wss://your-tunnel-1.ngrok.io"]]
     )
 
 class Task(TaskCreate):
@@ -15,8 +15,9 @@ class Task(TaskCreate):
     status_reason: Optional[str] = None
     failed_action_context: Optional[Dict[str, Any]] = Field(
         None,
-        description="Контекст для Human-in-the-Loop, включая URL 'зависшего' браузера"
+        description="Контекст для Human-in-the-Loop"
     )
+    result: Optional[Any] = Field(None, description="Финальный результат выполнения задачи")
 
 class ResumeTaskRequest(BaseModel):
     action: Dict[str, Any] = Field(
