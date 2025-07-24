@@ -96,7 +96,7 @@ services:
       - api
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.flower.rule=Host(`adminka.ornold.com`)"
+      - "traefik.http.routers.flower.rule=Host(`flower.ornold.com`)"
       - "traefik.http.routers.flower.entrypoints=websecure"
       - "traefik.http.routers.flower.tls.certresolver=myresolver"
       - "traefik.http.services.flower.loadbalancer.server.port=5555"
