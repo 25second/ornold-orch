@@ -4,5 +4,4 @@ requests
 python-dotenv
 beautifulsoup4
 celery
-redis
-jinja2 
+redis 

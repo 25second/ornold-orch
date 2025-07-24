@@ -66,11 +66,6 @@ services:
       - "traefik.http.routers.ornold-api.entrypoints=websecure"
       - "traefik.http.routers.ornold-api.tls.certresolver=myresolver"
       - "traefik.http.services.ornold-api.loadbalancer.server.port=8000"
-      # Админ-панель
-      - "traefik.http.routers.ornold-admin.rule=Host(`flower.ornold.com`)"
-      - "traefik.http.routers.ornold-admin.entrypoints=websecure"
-      - "traefik.http.routers.ornold-admin.tls.certresolver=myresolver"
-      - "traefik.http.services.ornold-admin.loadbalancer.server.port=8000"
 
   # 4. Воркер (Celery)
   worker:
