@@ -124,7 +124,8 @@ class GemmaClient:
         """
         Универсальный мыслительный цикл агента. Определяет следующее действие.
         """
-        system_prompt = f"""
+        # Собираем всю инструкцию в один большой промпт, как того требует API.
+        full_prompt = f"""
 Ты — мозг автономного универсального агента.
 Твоя главная цель: "{goal}"
 
@@ -140,30 +141,21 @@ class GemmaClient:
 5.  `{{ "action": "finish", "result": "...", "reasoning": "..." }}`
     - Используй, когда главная цель полностью достигнута. В `result` кратко опиши итог.
 
-# Задача
-Проанализируй цель, историю и восприятие. Определи **одно** следующее действие.
-Твой ответ должен быть ТОЛЬКО JSON-объектом одного из указанных выше действий. Добавь поле `reasoning` для объяснения своего выбора.
-"""
-        
-        user_prompt = f"""
 # Контекст
 Твоя история действий (последние 10): {history[-10:]}
 Твое текущее восприятие мира:
 {json.dumps(perception, indent=2, ensure_ascii=False)}
 
-Какое следующее действие предпринять для достижения цели: "{goal}"?
+# Задача
+Проанализируй всё вышесказанное и определи **одно** следующее действие.
+Твой ответ должен быть ТОЛЬКО JSON-объектом одного из указанных выше действий. Добавь поле `reasoning` для объяснения своего выбора.
 """
-
-        logger.info("Запрос к LLM для 'универсального' следующего действия...")
+        logger.info("Запрос к LLM (формат 'prompt')...")
         
+        # Формируем payload в формате, подтвержденном тестами.
         payload = {
             "input": {
-                # Формат для OpenAI-совместимых моделей
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "stream": False # Убедимся, что не используем стриминг
+                "prompt": full_prompt
             }
         }
         
@@ -172,21 +164,20 @@ class GemmaClient:
         # 1. Явно обрабатываем ошибку от нашего клиента
         if "error" in llm_response:
             logger.error(f"Ошибка от _run_and_poll_task: {llm_response['error']}")
-            return {"action": "think", 
-                    "text": f"Внутренняя ошибка LLM-клиента: {llm_response['error']}", 
-                    "reasoning": "LLM-клиент не смог получить ответ от API."}
+            return {"action": "think", "text": f"Внутренняя ошибка LLM-клиента: {llm_response['error']}", "reasoning": "LLM-клиент не смог получить ответ от API."}
 
-        # 2. Обрабатываем успешный ответ
-        if llm_response and 'choices' in llm_response and llm_response['choices']:
+        # 2. Парсим успешный ответ, структура которого подтверждена тестами.
+        if llm_response and isinstance(llm_response, list) and llm_response[0].get('choices'):
             try:
-                content = llm_response['choices'][0]['message']['content']
-                # Убираем возможные тройные кавычки и слово 'json'
+                # Структура ответа: response['output'][0]['choices'][0]['text']
+                # _run_and_poll_task возвращает нам `output`, так что начинаем с [0]
+                content = llm_response[0]['choices'][0]['text']
                 cleaned_content = content.strip().replace("```json", "").replace("```", "")
                 return json.loads(cleaned_content)
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError, IndexError) as e:
                 logger.error(f"Не удалось распарсить JSON из ответа LLM: {e}. Ответ: {content}")
                 return {"action": "think", "text": f"Ошибка парсинга ответа от LLM: {content}"}
-        
+
         logger.warning(f"Получен нестандартный ответ от LLM: {llm_response}")
         return {"action": "think", "text": f"Получен непонятный ответ от LLM: {llm_response}"}
 
