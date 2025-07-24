@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ornold_chromadb
+    ports:
+      - "8001:8000" # Прокидываем порт 8000 контейнера на 8001 хоста
+    volumes:
+      - ./chroma_data:/chroma/.chroma/
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE 

@@ -11,8 +11,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class RAGMemory:
-    def __init__(self, db_path="./chroma_db"):
-        self.client = chromadb.PersistentClient(path=db_path)
+    def __init__(self):
+        # --- Подключение к ChromaDB как к серверу ---
+        self.client = chromadb.HttpClient(host="localhost", port=8001)
+        logger.info("RAG Memory: Подключение к серверу ChromaDB на http://localhost:8001")
         
         # Коллекция для успешных сценариев (как было)
         self.scenarios_collection = self.client.get_or_create_collection(
