@@ -120,13 +120,50 @@ class GemmaClient:
         }
         return self._run_and_poll_task(payload)
 
-    def classify_error(self, error_context: str) -> dict:
-        prompt = f"""
-        Ты - ИИ ассистент для анализа ошибок.
-        Контекст ошибки: {error_context}
-        Классифицируй ошибку. Верни ТОЛЬКО JSON объект со структурой: {{ "error_type": "...", "reason": "...", "recommended_recovery": "..." }}
+    def classify_error(self, goal: str, url: str, marked_html: str, failed_action: dict, exception_message: str) -> dict:
         """
-        return self._run_and_poll_task(prompt)
+        Анализирует контекст ошибки и предлагает стратегию восстановления.
+        """
+        prompt = f"""
+Ты — продвинутый ИИ-аналитик, помогающий веб-агенту восстанавливаться после ошибок.
+Агент пытался выполнить цель: "{goal}".
+
+Он находился на странице: {url}
+Он пытался выполнить действие: {failed_action}
+Но получил Python-исключение: "{exception_message}"
+
+Вот HTML-код страницы, на которой произошла ошибка:
+---
+{marked_html}
+---
+
+Твоя задача — проанализировать ситуацию и предложить лучшую стратегию восстановления.
+
+Возможные типы ошибок:
+- "stale_element": Элемент устарел или исчез со страницы.
+- "navigation_error": Ошибка при переходе на новую страницу.
+- "element_not_found": Элемент не был найден селектором.
+- "unexpected_content": На странице неожиданный контент (капча, попап, ошибка 404).
+- "login_failed": Неудачная попытка входа в систему.
+- "unknown": Другая ошибка.
+
+Возможные стратегии восстановления:
+- "retry": Попробовать выполнить то же самое действие еще раз. Может помочь, если ошибка была случайной.
+- "refresh": Обновить страницу. Помогает, если элементы "зависли".
+- "go_back": Вернуться на предыдущую страницу.
+- "human_intervention": Если ты считаешь, что агент не справится сам.
+
+Проанализируй HTML и ошибку и верни ТОЛЬКО JSON-объект с твоим вердиктом.
+Пример:
+{{"error_type": "stale_element", "recovery_strategy": "refresh"}}
+"""
+        logger.info("Запрос к LLM для классификации ошибки...")
+        payload = {
+            "input": {
+                "prompt": prompt
+            }
+        }
+        return self._run_and_poll_task(payload)
 
     def create_plan_for_goal(self, goal: str) -> dict:
         prompt = f"""

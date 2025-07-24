@@ -266,19 +266,82 @@ class SessionAgent:
 
             action = await self._decide_next_action(step, perception_data)
 
-            # 3. Действие
-            await self._execute_action(action)
+            try:
+                # 3. Выполнение
+                await self._execute_action(action)
+                
+                # 4. Верификация (базовая)
+                # TODO: Добавить более сложную верификацию
+                
+            except Exception as e:
+                logger.error(f"Агент (Эндпоинт: {self.browser_endpoint_url}): Произошла ошибка при выполнении шага '{step}'. Ошибка: {e}")
+                
+                # --- Начало протокола восстановления ---
+                logger.info("--- ЗАПУСК ПРОТОКОЛА ВОССТАНОВЛЕНИЯ ---")
+                error_perception_data = await self.get_perception_data()
+                error_url = error_perception_data.get("url", "")
+                error_html = error_perception_data.get("marked_html", "")
 
-            # 4. Проверка состояния
-            if not await self._verify_state_after_action(action):
-                # Вместо простого break, запускаем протокол восстановления
-                page_text = await self.page.content()
-                await self._start_recovery_protocol(page_text[-500:]) # Передаем последний кусок страницы
-                break 
+                # 1. Поиск в базе знаний похожих ошибок
+                similar_failures = await rag_memory_instance.search_similar_failures(
+                    goal=step, url=error_url, failed_action=action, exception_message=str(e)
+                )
+
+                strategy = None
+                # Если нашли очень похожую ошибку, используем проверенную стратегию
+                if similar_failures and similar_failures[0][1] < 0.2: # 0.2 - порог сходства
+                    strategy = similar_failures[0][0].get('recovery_strategy')
+                    logger.info(f"Найдено решение в базе знаний! Применяю стратегию: '{strategy}'")
+                
+                # 2. Если в базе знаний нет решения, обращаемся к LLM
+                if not strategy:
+                    logger.info("В базе знаний решений не найдено, обращаюсь к LLM для выработки стратегии.")
+                    classification = await llm_client.classify_error(
+                        goal=step,
+                        url=error_url,
+                        marked_html=error_html,
+                        failed_action=action,
+                        exception_message=str(e)
+                    )
+                    logger.warning(f"Вердикт LLM по ошибке: {classification}")
+                    strategy = classification.get("recovery_strategy")
+
+                # 3. Применение стратегии и обучение
+                recovery_successful = False
+                if strategy == "refresh":
+                    logger.info("Стратегия восстановления: Обновляю страницу.")
+                    if self.page: await self.page.reload()
+                    recovery_successful = True
+                elif strategy == "go_back":
+                    logger.info("Стратегия восстановления: Возвращаюсь назад.")
+                    if self.page: await self.page.go_back()
+                    recovery_successful = True
+                elif strategy == "retry":
+                    logger.info("Стратегия восстановления: Повторяю последнее действие.")
+                    recovery_successful = True # Действие будет повторено на следующей итерации
+                else: # "human_intervention" или неизвестная стратегия
+                    logger.error("Стратегия восстановления: Требуется вмешательство человека.")
+                    await self._request_human_intervention(f"Агент не смог выработать стратегию. Последний вердикт: {strategy}")
+                    break
+                
+                # 4. Если восстановление было успешным, запоминаем этот опыт
+                if recovery_successful and strategy:
+                    logger.info(f"Восстановление прошло успешно. Сохраняю опыт в базу знаний.")
+                    await rag_memory_instance.add_failure_log(
+                        goal=step, url=error_url, failed_action=action, 
+                        exception_message=str(e), recovery_strategy=strategy
+                    )
+                
+                # Если стратегия была "retry", просто переходим к следующей итерации
+                if strategy == "retry":
+                    continue
+
+            # Если мы дошли сюда, значит шаг (или его восстановление) прошел успешно
+            logger.info(f"--- Агент (Эндпоинт: {self.browser_endpoint_url}): Шаг '{step}' успешно завершен ---")
 
 
         self.status = "finished"
-        print(f"Агент {self.task_id} завершил выполнение плана.")
+        logger.info(f"Агент {self.task_id} завершил выполнение плана.")
 
 # --- Пример использования (для тестирования) ---
 async def main():

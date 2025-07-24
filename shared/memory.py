@@ -3,6 +3,9 @@ import requests
 import os
 from dotenv import load_dotenv
 import logging
+import asyncio
+import json
+import hashlib
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -11,9 +14,20 @@ class RAGMemory:
     def __init__(self, db_path="./chroma_db"):
         self.client = chromadb.PersistentClient(path=db_path)
         
-        self.scenarios_collection = self.client.get_or_create_collection(name="successful_scenarios")
-        self.failures_collection = self.client.get_or_create_collection(name="failure_knowledge_base")
+        # Коллекция для успешных сценариев (как было)
+        self.scenarios_collection = self.client.get_or_create_collection(
+            name="successful_scenarios",
+            metadata={"hnsw:space": "cosine"} 
+        )
         
+        # Новая коллекция для базы знаний по ошибкам
+        self.failures_collection = self.client.get_or_create_collection(
+            name="failure_knowledge_base",
+            metadata={"hnsw:space": "cosine"}
+        )
+        
+        logger.info("RAG Memory инициализирована с коллекциями 'successful_scenarios' и 'failure_knowledge_base'")
+
         # --- Новые настройки для API эмбеддингов ---
         self.embedding_endpoint_id = os.getenv("RUNPOD_ENDPOINT_ID_EMBEDDING")
         self.api_key = os.getenv("RUNPOD_API_KEY")
@@ -25,7 +39,7 @@ class RAGMemory:
         self.embedding_api_url = f"https://api.runpod.ai/v2/{self.embedding_endpoint_id}/openai/v1/embeddings"
         logger.info(f"Система памяти RAG инициализирована. Используется API эндпоинт: {self.embedding_api_url}")
     
-    def _get_embedding(self, text: str) -> list[float]:
+    async def _get_embedding(self, text: str) -> list[float]:
         """Получает векторное представление текста через API."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -50,11 +64,11 @@ class RAGMemory:
             return []
 
 
-    def add_successful_scenario(self, goal: str, steps: list[str]):
-        document = f"Цель: {goal}\n" + "\n".join(f"Шаг: {step}" for step in steps)
+    async def add_successful_scenario(self, goal: str, actions: list[dict]):
+        document = f"Цель: {goal}\n" + "\n".join(f"Шаг: {json.dumps(step)}" for step in actions)
         doc_id = f"scenario_{self.scenarios_collection.count() + 1}"
         
-        embedding = self._get_embedding(document)
+        embedding = await self._get_embedding(document)
         if not embedding:
             logger.warning(f"Не удалось получить эмбеддинг для успешного сценария '{goal}'. Пропускаю.")
             return
@@ -75,29 +89,75 @@ class RAGMemory:
             query_embeddings=[query_embedding], n_results=n_results
         )
         
-    def add_failure_log(self, error_context: str, attempted_strategy: str, was_successful: bool):
-        document = f"Контекст ошибки: {error_context}\nСтратегия: {attempted_strategy}\nУспех: {was_successful}"
-        doc_id = f"failure_{self.failures_collection.count() + 1}"
+    async def add_failure_log(self, goal: str, url: str, failed_action: dict, exception_message: str, recovery_strategy: str):
+        """
+        Сохраняет в базу знаний запись о провале и успешной стратегии восстановления.
+        """
+        # Создаем подробное текстовое описание проблемы
+        error_context_text = f"Цель: {goal}. URL: {url}. Действие: {json.dumps(failed_action)}. Ошибка: {exception_message}"
         
-        embedding = self._get_embedding(error_context) # Векторизуем именно контекст ошибки
-        if not embedding:
-            logger.warning(f"Не удалось получить эмбеддинг для лога ошибки. Пропускаю.")
-            return
-
+        embedding = await self._get_embedding(error_context_text)
+        
+        # ID будет хэшем от контекста, чтобы избежать дубликатов
+        doc_id = hashlib.sha256(error_context_text.encode()).hexdigest()
+        
+        logger.info(f"Добавляю запись об ошибке в базу знаний. ID: {doc_id}")
+        
         self.failures_collection.add(
-            embeddings=[embedding], documents=[document],
-            metadatas=[{"successful": was_successful}], ids=[doc_id]
-        )
-        logger.info(f"Сохранен лог ошибки с ID {doc_id}")
-
-    def search_similar_failures(self, error_context: str, n_results: int = 1) -> dict:
-        query_embedding = self._get_embedding(error_context)
-        if not query_embedding:
-            return {}
-            
-        return self.failures_collection.query(
-            query_embeddings=[query_embedding], n_results=n_results,
-            where={"successful": True} 
+            documents=[error_context_text],
+            metadatas=[{"recovery_strategy": recovery_strategy}],
+            embeddings=[embedding],
+            ids=[doc_id]
         )
 
-rag_memory_instance = RAGMemory() 
+    async def search_similar_failures(self, goal: str, url: str, failed_action: dict, exception_message: str, n_results: int = 1) -> list:
+        """
+        Ищет в базе знаний похожие ошибки и возвращает проверенные стратегии восстановления.
+        """
+        error_context_text = f"Цель: {goal}. URL: {url}. Действие: {json.dumps(failed_action)}. Ошибка: {exception_message}"
+        embedding = await self._get_embedding(error_context_text)
+        
+        results = self.failures_collection.query(
+            query_embeddings=[embedding],
+            n_results=n_results,
+            include=["metadatas", "distances"]
+        )
+        logger.info(f"Поиск похожих ошибок в базе знаний нашел: {results}")
+        
+        # Возвращаем метаданные (где хранится стратегия) и расстояние до запроса
+        return list(zip(results.get('metadatas', [[]])[0], results.get('distances', [[]])[0]))
+
+
+rag_memory_instance = RAGMemory()
+
+async def main():
+    # --- Тестирование новой логики ошибок ---
+    print("\n--- Тестирование памяти на ошибках ---")
+    test_action = {"action": "click", "element_id": "login_button"}
+    
+    # Добавляем запись об ошибке
+    await rag_memory_instance.add_failure_log(
+        goal="Войти в систему",
+        url="https://example.com/login",
+        failed_action=test_action,
+        exception_message="TimeoutError: 30000ms exceeded",
+        recovery_strategy="refresh"
+    )
+    
+    # Ищем похожую ошибку
+    similar = await rag_memory_instance.search_similar_failures(
+        goal="Войти в систему",
+        url="https://example.com/login",
+        failed_action=test_action,
+        exception_message="TimeoutError: waiting for selector", # немного другая ошибка, но контекст тот же
+        n_results=1
+    )
+    
+    if similar:
+        print(f"Найдена похожая ошибка. Рекомендованная стратегия: {similar[0][0]['recovery_strategy']} (Сходство: {1 - similar[0][1]:.2f})")
+    else:
+        print("Похожих ошибок не найдено.")
+
+
+if __name__ == "__main__":
+    asyncio.run(main()) 
