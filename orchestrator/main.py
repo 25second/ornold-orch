@@ -7,6 +7,9 @@ import redis
 from .schemas import Task, TaskCreate, ResumeTaskRequest
 from .orchestrator import orchestrator_instance
 from worker import run_web_agent_task
+import logging
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Web Agent Orchestrator")
 
@@ -57,24 +60,23 @@ def resume_task(task_id: str, resume_request: ResumeTaskRequest):
     if task.status != 'human_intervention_required':
         raise HTTPException(status_code=400, detail=f"Task status is '{task.status}', not 'human_intervention_required'")
 
-    print(f"Возобновляю задачу {task_id} с новым действием от оператора: {resume_request.action}")
+    logger.info(f"Возобновляю задачу {task_id} с новым действием от оператора: {resume_request.action}")
 
-    # Здесь должна быть логика получения старого плана и добавления нового шага.
-    # Для простоты, мы просто поставим в очередь одно это действие.
-    # В реальной системе нужно было бы найти, на каком шаге произошла ошибка,
-    # и перестроить остаток плана.
-    new_plan = [f"Действие от оператора: {resume_request.action.get('action')} на {resume_request.action.get('element_id')}"]
+    # Извлекаем URL "зависшего" браузера из контекста ошибки
+    failed_context = task.failed_action_context or {}
+    browser_endpoint_url = failed_context.get("browser_endpoint_url")
+    
+    if not browser_endpoint_url:
+        raise HTTPException(status_code=400, detail="Не удалось найти browser_endpoint_url в контексте ошибки для возобновления.")
 
-    # TODO: Нам нужен profile_id и cdp_port, сохраненные в задаче.
-    # Пока что хардкодим.
-    profile_id = "profile_stuck" 
-    cdp_port = 9222
+    # Создаем новый, простой план из одного действия, предоставленного оператором.
+    new_plan = [f"Действие от оператора: {resume_request.action.get('action')} на элементе {resume_request.action.get('element_id')}"]
 
+    logger.info(f"Отправляю задачу на возобновление для эндпоинта: {browser_endpoint_url}")
     run_web_agent_task.delay(
         task_id=task.id,
-        profile_id=profile_id, 
-        cdp_port=cdp_port, 
-        plan=new_plan # Отправляем новый мини-план
+        browser_endpoint_url=browser_endpoint_url, 
+        plan=new_plan
     )
 
     task.status = "queued"

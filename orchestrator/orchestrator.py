@@ -21,21 +21,17 @@ class Orchestrator:
         print(f"Запускаю задачу {task.id}: {task.goal}")
         
         plan = self._create_plan(task.goal)
-        print(f"Создан план: {plan}")
+        logger.info(f"Создан план: {plan}")
 
-        for profile_id in task.browser_profiles:
-            # В реальном приложении порт будет приходить из конфига или API
-            cdp_port = 9222 
-            print(f"Ставлю в очередь задачу для профиля: {profile_id} на порту {cdp_port}")
-            # Асинхронно отправляем задачу в очередь
+        for endpoint_url in task.browser_endpoints:
+            logger.info(f"Ставлю в очередь задачу для эндпоинта: {endpoint_url}")
             run_web_agent_task.delay(
                 task_id=task.id,
-                profile_id=profile_id, 
-                cdp_port=cdp_port, 
+                browser_endpoint_url=endpoint_url,
                 plan=plan
             )
         
-        task.status = "queued" # Меняем статус на "в очереди"
+        task.status = "queued"
         return task
 
     def _create_plan(self, goal: str) -> list[str]:

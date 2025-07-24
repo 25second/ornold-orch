@@ -6,35 +6,31 @@ import redis
 import json
 import logging
 from shared.llm_client import llm_client
+from typing import Optional
 
 redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 logger = logging.getLogger(__name__)
 
 class SessionAgent:
-    def __init__(self, task_id: str, profile_id: str, cdp_port: int):
+    def __init__(self, task_id: str, browser_endpoint_url: str):
         self.task_id = task_id
-        self.profile_id = profile_id
-        self.cdp_port = cdp_port
+        self.browser_endpoint_url = browser_endpoint_url
         self.status = "idle"
-        self.browser: Browser | None = None
-        self.page: Page | None = None
+        self.browser: Optional[Browser] = None
+        self.page: Optional[Page] = None
         self.action_history: list[dict] = []
-        logger.info(f"Агент для профиля {self.profile_id} (задача {self.task_id}) создан. Порт: {self.cdp_port}")
+        logger.info(f"Агент для эндпоинта {self.browser_endpoint_url} (задача {self.task_id}) создан.")
 
     async def connect_to_browser(self):
-        """
-        Подключается к запущенному браузеру по CDP.
-        """
-        print(f"Агент {self.profile_id}: Подключаюсь к браузеру на порту {self.cdp_port}...")
+        logger.info(f"Агент {self.task_id}: Подключаюсь к браузеру по эндпоинту {self.browser_endpoint_url}...")
         try:
             p = await async_playwright().start()
-            self.browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{self.cdp_port}")
-            # Берем первую открытую вкладку. В реальности тут может быть более сложная логика.
+            self.browser = await p.chromium.connect_over_cdp(self.browser_endpoint_url)
             self.page = self.browser.contexts[0].pages[0]
-            print(f"Агент {self.profile_id}: Успешно подключился. Текущая страница: {self.page.url}")
+            logger.info(f"Агент {self.task_id}: Успешно подключился. Текущая страница: {self.page.url}")
             return True
         except Exception as e:
-            print(f"Агент {self.profile_id}: Не удалось подключиться к браузеру. Ошибка: {e}")
+            logger.error(f"Агент {self.task_id}: Не удалось подключиться к браузеру по эндпоинту {self.browser_endpoint_url}. Ошибка: {e}")
             return False
 
     async def get_perception_data(self) -> dict:
@@ -104,7 +100,7 @@ class SessionAgent:
         Запускает протокол восстановления после обнаружения аномалии.
         """
         classification = await self._classify_anomaly(error_context)
-        print(f"Агент {self.profile_id}: Аномалия классифицирована: {classification}")
+        print(f"Агент {self.task_id}: Аномалия классифицирована: {classification}")
 
         recovery_strategy = classification.get("recommended_recovery")
         
@@ -137,14 +133,18 @@ class SessionAgent:
         Помечает задачу как требующую вмешательства человека.
         Сохраняет контекст для возобновления.
         """
-        print(f"Агент {self.profile_id}: Запрашиваю вмешательство человека. Причина: {reason}")
+        logger.warning(f"Агент {self.task_id}: Запрашиваю вмешательство человека. Причина: {reason}")
         
         task_json = redis_client.get(f"task:{self.task_id}")
         if task_json:
             task_data = json.loads(task_json)
             task_data['status'] = 'human_intervention_required'
             task_data['status_reason'] = reason
-            task_data['failed_action_context'] = failed_action
+            
+            # Добавляем в контекст URL, чтобы оператор знал, с каким браузером работать
+            context = failed_action or {}
+            context['browser_endpoint_url'] = self.browser_endpoint_url
+            task_data['failed_action_context'] = context
             
             redis_client.set(f"task:{self.task_id}", json.dumps(task_data))
 
@@ -156,7 +156,7 @@ class SessionAgent:
         action_type = action.get("action")
         element_id = action.get("element_id")
         
-        print(f"Агент {self.profile_id}: Подготовка к действию '{action_type}' на элементе '{element_id}'")
+        print(f"Агент {self.task_id}: Подготовка к действию '{action_type}' на элементе '{element_id}'")
 
         if action_type == "click":
             await self._human_like_click(element_id)
@@ -164,7 +164,7 @@ class SessionAgent:
             text_to_type = action.get("text", "")
             await self._human_like_type(element_id, text_to_type)
         else:
-            print(f"Агент {self.profile_id}: Неизвестное действие '{action_type}'")
+            print(f"Агент {self.task_id}: Неизвестное действие '{action_type}'")
         
         # Добавляем действие в историю
         self.action_history.append(action)
@@ -225,7 +225,7 @@ class SessionAgent:
         Запускает выполнение плана для этого сессионного агента.
         """
         self.status = "running"
-        print(f"Агент {self.profile_id} начинает выполнение плана: {plan}")
+        logger.info(f"Агент для эндпоинта {self.browser_endpoint_url} начинает выполнение плана: {plan}")
         
         if not self.browser or not self.page:
             is_connected = await self.connect_to_browser()
@@ -234,13 +234,16 @@ class SessionAgent:
                 return
 
         for step in plan:
-            print(f"--- Агент {self.profile_id}: Выполняю шаг '{step}' ---")
+            logger.info(f"--- Агент (Эндпоинт: {self.browser_endpoint_url}): Выполняю шаг '{step}' ---")
             
-            # 1. Восприятие
             perception_data = await self.get_perception_data()
-            print(f"URL: {perception_data.get('url')}")
+            if perception_data:
+                logger.info(f"URL: {perception_data.get('url')}")
+            else:
+                logger.warning("Не удалось получить данные восприятия (perception data).")
+                await self._request_human_intervention("Не удалось получить данные со страницы, возможно, она закрыта.")
+                break
 
-            # 2. Решение
             action = await self._decide_next_action(step, perception_data)
 
             # 3. Действие
@@ -255,13 +258,15 @@ class SessionAgent:
 
 
         self.status = "finished"
-        print(f"Агент {self.profile_id} завершил выполнение плана.")
+        print(f"Агент {self.task_id} завершил выполнение плана.")
 
 # --- Пример использования (для тестирования) ---
 async def main():
-    # Запустите ваш браузер с флагом --remote-debugging-port=9222
-    agent = SessionAgent(task_id="test_task_id", profile_id="test_profile", cdp_port=9222)
-    await agent.run_task(["Шаг 1: Проверить подключение"])
+    # Тестовый запуск SessionAgent (требует реального эндпоинта)
+    # TEST_URL = "wss://your-tunnel.ngrok.io" 
+    # agent = SessionAgent(task_id="test_task_id", browser_endpoint_url=TEST_URL)
+    # await agent.run_task(["Шаг 1: Проверить подключение"])
+    pass
 
 if __name__ == "__main__":
     asyncio.run(main()) 

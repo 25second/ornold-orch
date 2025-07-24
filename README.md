@@ -86,7 +86,7 @@ curl -X POST "http://127.0.0.1:8000/tasks" ^
 -H "Content-Type: application/json" ^
 -d '{
   "goal": "Зайти на сайт github.com и найти в поиске репозиторий \"langchain\"",
-  "browser_profiles": ["profile1"]
+  "browser_endpoints": ["wss://your-unique-tunnel.ngrok.io"]
 }'
 ```
 

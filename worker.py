@@ -11,10 +11,10 @@ celery_app = Celery(
 )
 
 @celery_app.task
-def run_web_agent_task(task_id: str, profile_id: str, cdp_port: int, plan: list[str]):
+def run_web_agent_task(task_id: str, browser_endpoint_url: str, plan: list[str]):
     """
     Celery-задача, которая инициализирует и запускает сессионного агента.
     """
-    agent = SessionAgent(task_id=task_id, profile_id=profile_id, cdp_port=cdp_port)
+    agent = SessionAgent(task_id=task_id, browser_endpoint_url=browser_endpoint_url)
     asyncio.run(agent.run_task(plan))
-    return f"Агент {profile_id} завершил работу над задачей {task_id}." 
+    return f"Агент для эндпоинта {browser_endpoint_url} завершил работу над задачей {task_id}." 
