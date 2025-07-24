@@ -94,7 +94,9 @@ class UniversalAgent:
                 self._action_finish(action.get("result"))
             
             else:
-                raise ValueError(f"Неизвестный тип действия: {action_type}")
+                # Вместо падения, логируем неизвестное действие и продолжаем как "think"
+                logger.warning(f"Неизвестный тип действия: {action_type}. Обрабатываю как 'think'.")
+                self.internal_thoughts.append(f"LLM предложил неизвестное действие: {action}. Нужно переосмыслить задачу.")
 
         except Exception as e:
             logger.error(f"Ошибка при выполнении действия {action}: {e}")
