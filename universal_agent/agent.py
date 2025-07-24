@@ -112,8 +112,26 @@ class UniversalAgent:
             # Берем первый доступный эндпоинт
             endpoint = self.available_browser_endpoints.pop(0)
             logger.info(f"Агент {self.task_id} запрашивает браузер, подключаюсь к {endpoint}...")
+            
+            # Получаем правильный WebSocket URL, заменяя localhost на публичный хост
+            import requests
+            response = requests.get(endpoint)
+            browser_info = response.json()
+            ws_url = browser_info.get("webSocketDebuggerUrl")
+            
+            if not ws_url:
+                raise ConnectionError(f"Не удалось получить webSocketDebuggerUrl из {endpoint}")
+            
+            # Заменяем 127.0.0.1 на хост из endpoint'а
+            import urllib.parse
+            parsed_endpoint = urllib.parse.urlparse(endpoint)
+            ws_url = ws_url.replace("127.0.0.1", parsed_endpoint.hostname)
+            ws_url = ws_url.replace("localhost", parsed_endpoint.hostname)
+            
+            logger.info(f"Подключаюсь к WebSocket: {ws_url}")
+            
             p = await async_playwright().start()
-            self.browser = await p.chromium.connect_over_cdp(endpoint)
+            self.browser = await p.chromium.connect_over_cdp(ws_url)
             self.page = self.browser.contexts[0].pages[0]
 
         logger.info(f"Агент {self.task_id} переходит по URL: {url}")
