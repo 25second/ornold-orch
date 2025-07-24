@@ -38,7 +38,19 @@ async def create_task(task_create: TaskCreate):
 @app.get("/tasks", response_model=List[Task])
 def get_tasks():
     task_keys = redis_client.keys("task:*")
-    tasks = [Task.model_validate_json(redis_client.get(key)) for key in task_keys]
+    tasks = []
+    for key in task_keys:
+        task_json = redis_client.get(key)
+        if not task_json:
+            continue
+        try:
+            # Пытаемся валидировать JSON. Если не получается - пропускаем.
+            tasks.append(Task.model_validate_json(task_json))
+        except Exception:
+            # Логируем ошибку, чтобы знать о проблемных ключах.
+            # В проде можно убрать, если будет слишком "шумно".
+            logger.warning(f"Не удалось распарсить JSON для ключа '{key}'. Значение: '{task_json}'")
+            continue
     return tasks
 
 @app.get("/tasks/{task_id}", response_model=Task)
