@@ -26,13 +26,30 @@ async def create_task(task_request: TaskCreate):
     task = await orchestrator_instance.create_task(task_request)
     return await orchestrator_instance.start_task(task)
 
-@app.get("/tasks", response_model=list[Task])
+
+@app.get("/tasks", response_model=List[Task])
 async def get_all_tasks():
-    """
-    Возвращает список всех задач.
-    """
-    tasks_data = orchestrator_instance.get_all_tasks()
-    return [Task(**task) for task in tasks_data]
+    tasks = []
+    # Используем scan_iter для безопасного сканирования ключей в Redis
+    for key in orchestrator_instance.redis_client.scan_iter("task:*"):
+        # Убедимся, что это ключ задачи, а не ключ для celery_id
+        if "celery_id" not in key:
+            task_data = orchestrator_instance.redis_client.hgetall(key)
+            if task_data:
+                # Восстанавливаем browser_endpoints из JSON-строки, если они есть
+                if 'browser_endpoints' in task_data and task_data['browser_endpoints']:
+                    try:
+                        task_data['browser_endpoints'] = json.loads(task_data['browser_endpoints'])
+                    except json.JSONDecodeError:
+                        # В случае ошибки парсинга, оставляем как есть или ставим None
+                        task_data['browser_endpoints'] = None
+                else:
+                    # Убедимся, что поле существует, даже если оно null, для соответствия модели
+                    task_data['browser_endpoints'] = None
+                
+                tasks.append(Task(**task_data))
+    return tasks
+
 
 @app.get("/tasks/{task_id}", response_model=Task)
 async def get_task_status(task_id: str):
