@@ -23,7 +23,7 @@ class GemmaClient:
         logger.info(f"Клиент Gemma инициализирован. Используется эндпоинт: {self.base_url}")
 
 
-    def _run_and_poll_task(self, prompt: str) -> dict:
+    def _run_and_poll_task(self, payload) -> dict:
         """
         Реализует логику "Запустить и Опросить" для RunPod API.
         """
@@ -34,7 +34,13 @@ class GemmaClient:
         
         # --- Шаг 1: Запуск задачи ---
         run_url = f"{self.base_url}/run"
-        run_body = {"input": {"prompt": prompt}}
+        
+        # Если передали строку, оборачиваем в нужную структуру
+        if isinstance(payload, str):
+            run_body = {"input": {"prompt": payload}}
+        else:
+            # Если передали уже готовый payload, используем как есть
+            run_body = payload
 
         try:
             logger.info("Запускаю асинхронную задачу в LLM...")
@@ -113,12 +119,7 @@ class GemmaClient:
         logger.info("Запрос к LLM для получения следующего действия...")
         # logger.debug(f"Промпт для LLM: {prompt}") # Можно раскомментировать для отладки
 
-        payload = {
-            "input": {
-                "prompt": prompt
-            }
-        }
-        return self._run_and_poll_task(payload)
+        return self._run_and_poll_task(prompt)
 
     def get_next_action_universal(self, goal: str, history: list, perception: dict) -> dict:
         """
@@ -152,14 +153,7 @@ class GemmaClient:
 """
         logger.info("Запрос к LLM (формат 'prompt')...")
         
-        # Формируем payload в формате, подтвержденном тестами.
-        payload = {
-            "input": {
-                "prompt": full_prompt
-            }
-        }
-        
-        llm_response = self._run_and_poll_task(payload)
+        llm_response = self._run_and_poll_task(full_prompt)
 
         # 1. Явно обрабатываем ошибку от нашего клиента
         if "error" in llm_response:
@@ -187,12 +181,7 @@ class GemmaClient:
         Выполняет простой промпт и возвращает результат.
         """
         logger.info("Запрос к LLM с прямым промптом...")
-        payload = {
-            "input": {
-                "prompt": prompt
-            }
-        }
-        return self._run_and_poll_task(payload)
+        return self._run_and_poll_task(prompt)
 
     def classify_error(self, goal: str, url: str, marked_html: str, failed_action: dict, exception_message: str) -> dict:
         """
@@ -232,12 +221,7 @@ class GemmaClient:
 {{"error_type": "stale_element", "recovery_strategy": "refresh"}}
 """
         logger.info("Запрос к LLM для классификации ошибки...")
-        payload = {
-            "input": {
-                "prompt": prompt
-            }
-        }
-        return self._run_and_poll_task(payload)
+        return self._run_and_poll_task(prompt)
 
     def create_plan_for_goal(self, goal: str) -> dict:
         prompt = f"""
