@@ -169,7 +169,14 @@ class GemmaClient:
         
         llm_response = self._run_and_poll_task(payload)
 
-        # Часто ответ от LLM приходит внутри поля 'choices'
+        # 1. Явно обрабатываем ошибку от нашего клиента
+        if "error" in llm_response:
+            logger.error(f"Ошибка от _run_and_poll_task: {llm_response['error']}")
+            return {"action": "think", 
+                    "text": f"Внутренняя ошибка LLM-клиента: {llm_response['error']}", 
+                    "reasoning": "LLM-клиент не смог получить ответ от API."}
+
+        # 2. Обрабатываем успешный ответ
         if llm_response and 'choices' in llm_response and llm_response['choices']:
             try:
                 content = llm_response['choices'][0]['message']['content']
@@ -180,7 +187,8 @@ class GemmaClient:
                 logger.error(f"Не удалось распарсить JSON из ответа LLM: {e}. Ответ: {content}")
                 return {"action": "think", "text": f"Ошибка парсинга ответа от LLM: {content}"}
         
-        return llm_response # Возвращаем как есть, если структура другая
+        logger.warning(f"Получен нестандартный ответ от LLM: {llm_response}")
+        return {"action": "think", "text": f"Получен непонятный ответ от LLM: {llm_response}"}
 
 
     def execute_prompt(self, prompt: str) -> dict:
