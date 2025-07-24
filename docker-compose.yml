@@ -25,7 +25,7 @@ services:
     build: . # Собираем из Dockerfile в текущей директории
     container_name: ornold_api
     ports:
-      - "8000:8000"
+      - "80:8000" # Прокидываем порт 8000 контейнера на порт 80 хоста
     env_file:
       - .env # Подключаем файл с переменными окружения
     depends_on:
