@@ -52,7 +52,8 @@ class UniversalAgent:
         # Получаем текущее "восприятие" мира
         perception = await self._get_perception_data()
 
-        return await llm_client.get_next_action_universal(
+        # Убираем await, т.к. llm_client сам обрабатывает асинхронность внутри
+        return llm_client.get_next_action_universal(
             goal=self.goal,
             history=self.history,
             perception=perception

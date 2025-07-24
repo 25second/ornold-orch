@@ -124,14 +124,9 @@ class GemmaClient:
         """
         Универсальный мыслительный цикл агента. Определяет следующее действие.
         """
-        prompt = f"""
+        system_prompt = f"""
 Ты — мозг автономного универсального агента.
 Твоя главная цель: "{goal}"
-
-# Контекст
-Твоя история действий (последние 10): {history[-10:]}
-Твое текущее восприятие мира:
-{json.dumps(perception, indent=2, ensure_ascii=False)}
 
 # Доступные действия
 1.  `{{ "action": "think", "text": "...", "reasoning": "..." }}`
@@ -149,13 +144,43 @@ class GemmaClient:
 Проанализируй цель, историю и восприятие. Определи **одно** следующее действие.
 Твой ответ должен быть ТОЛЬКО JSON-объектом одного из указанных выше действий. Добавь поле `reasoning` для объяснения своего выбора.
 """
+        
+        user_prompt = f"""
+# Контекст
+Твоя история действий (последние 10): {history[-10:]}
+Твое текущее восприятие мира:
+{json.dumps(perception, indent=2, ensure_ascii=False)}
+
+Какое следующее действие предпринять для достижения цели: "{goal}"?
+"""
+
         logger.info("Запрос к LLM для 'универсального' следующего действия...")
+        
         payload = {
             "input": {
-                "prompt": prompt
+                # Формат для OpenAI-совместимых моделей
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "stream": False # Убедимся, что не используем стриминг
             }
         }
-        return self._run_and_poll_task(payload)
+        
+        llm_response = self._run_and_poll_task(payload)
+
+        # Часто ответ от LLM приходит внутри поля 'choices'
+        if llm_response and 'choices' in llm_response and llm_response['choices']:
+            try:
+                content = llm_response['choices'][0]['message']['content']
+                # Убираем возможные тройные кавычки и слово 'json'
+                cleaned_content = content.strip().replace("```json", "").replace("```", "")
+                return json.loads(cleaned_content)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Не удалось распарсить JSON из ответа LLM: {e}. Ответ: {content}")
+                return {"action": "think", "text": f"Ошибка парсинга ответа от LLM: {content}"}
+        
+        return llm_response # Возвращаем как есть, если структура другая
 
 
     def execute_prompt(self, prompt: str) -> dict:
