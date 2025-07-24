@@ -1,0 +1,33 @@
+# traefik/traefik.yml
+
+# Включаем API Traefik и дашборд для отладки (небезопасно для продакшена без пароля)
+api:
+  dashboard: true
+  insecure: true # Временно для простоты, потом можно будет защитить паролем
+
+# Определяем "точки входа" для трафика
+entryPoints:
+  web:
+    address: ":80"
+    # Настраиваем автоматический редирект с HTTP на HTTPS
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+# Указываем, откуда Traefik будет брать конфигурацию роутов. В нашем случае - из Docker.
+providers:
+  docker:
+    exposedByDefault: false # Явно указываем, какие контейнеры обслуживать
+
+# Настраиваем получение SSL-сертификатов от Let's Encrypt
+certificatesResolvers:
+  myresolver:
+    acme:
+      email: "your-email@example.com" # ВАЖНО: Замените на вашу почту!
+      storage: "/etc/traefik/acme/acme.json"
+      httpChallenge:
+        entryPoint: "web" 

@@ -1,4 +1,26 @@
 services:
+  # 0. Reverse Proxy
+  traefik:
+    image: traefik:v2.10
+    container_name: ornold_traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=your-email@example.com" # ЗАМЕНИ НА СВОЮ ПОЧТУ
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080" # Дашборд Traefik
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+
   # 1. Сервис Redis для Celery и хранения состояния
   redis:
     image: redis:7-alpine
@@ -10,8 +32,9 @@ services:
   chromadb:
     image: chromadb/chroma:latest
     container_name: ornold_chromadb
-    ports:
-      - "8001:8000"
+    # Порт 8001 больше не публикуется наружу, Traefik будет общаться с ним по внутренней сети
+    # ports:
+    #   - "8001:8000" 
     volumes:
       - ./chroma_data:/chroma/.chroma/
     environment:
@@ -24,14 +47,21 @@ services:
   api:
     build: . # Собираем из Dockerfile в текущей директории
     container_name: ornold_api
-    ports:
-      - "80:8000" # Прокидываем порт 8000 контейнера на порт 80 хоста
+    # Порт 8000 больше не публикуется наружу, Traefik сам найдет его
+    # ports:
+    #   - "80:8000" 
     env_file:
       - .env # Подключаем файл с переменными окружения
     depends_on:
       - redis
       - chromadb
     command: uvicorn orchestrator.main:app --host 0.0.0.0 --port 8000 --reload
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ornold-api.rule=Host(`agent.ornold.com`)"
+      - "traefik.http.routers.ornold-api.entrypoints=websecure"
+      - "traefik.http.routers.ornold-api.tls.certresolver=myresolver"
+      - "traefik.http.services.ornold-api.loadbalancer.server.port=8000"
 
   # 4. Воркер (Celery)
   worker:
@@ -46,4 +76,5 @@ services:
     command: celery -A worker.celery_app worker --loglevel=info
 
 volumes:
-  chroma_data: 
+  chroma_data:
+  letsencrypt: 
