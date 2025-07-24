@@ -1,5 +1,7 @@
 import shared.logging_config
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 import uuid
 import json
 from typing import List
@@ -7,7 +9,6 @@ import redis
 import os
 from .schemas import Task, TaskCreate, ResumeTaskRequest
 from .orchestrator import orchestrator_instance
-from worker import run_agent_task
 import logging
 
 # Получаем хост Redis из переменной окружения
@@ -17,6 +18,50 @@ redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=Tr
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Web Agent Orchestrator")
+
+# Настройка шаблонов
+templates = Jinja2Templates(directory="orchestrator/templates")
+
+# Простая аутентификация
+def is_authenticated(request: Request):
+    auth_cookie = request.cookies.get("auth")
+    if auth_cookie != "supersecretcookie": # В реальном приложении это должно быть безопасно
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    return True
+
+@app.get("/login")
+def login_form(request: Request):
+    # Простая форма входа для демонстрации
+    return HTMLResponse("""
+        <h1>Вход в админ-панель</h1>
+        <form action="/login" method="post">
+            <input type="password" name="password" placeholder="Пароль">
+            <button type="submit">Войти</button>
+        </form>
+    """)
+
+@app.post("/login")
+async def login(request: Request):
+    form = await request.form()
+    # В реальном приложении сверяем с FLOWER_USER/PASSWORD из .env
+    if form.get("password") == "supersecretpassword": 
+        response = RedirectResponse(url="/admin", status_code=302)
+        response.set_cookie(key="auth", value="supersecretcookie", httponly=True)
+        return response
+    return "Неверный пароль", 400
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, authenticated: bool = Depends(is_authenticated)):
+    tasks = orchestrator_instance.get_all_tasks()
+    return templates.TemplateResponse("admin.html", {"request": request, "tasks": tasks})
+
+
+@app.post("/admin/tasks/{task_id}/stop")
+async def admin_stop_task(task_id: str, authenticated: bool = Depends(is_authenticated)):
+    logger.info(f"Получен запрос на остановку задачи {task_id} из админ-панели")
+    orchestrator_instance.stop_task(task_id)
+    return RedirectResponse(url="/admin", status_code=303)
 
 
 @app.get("/")
@@ -35,14 +80,17 @@ async def create_task(task_create: TaskCreate):
     
     return task
 
-@app.get("/tasks", response_model=List[Task])
-def get_tasks():
-    task_keys = redis_client.keys("task:*")
-    tasks = [Task.model_validate_json(redis_client.get(key)) for key in task_keys]
-    return tasks
+@app.get("/tasks", response_model=list[Task])
+async def get_all_tasks():
+    """
+    Возвращает список всех задач.
+    """
+    tasks_data = orchestrator_instance.get_all_tasks()
+    return [Task(**task) for task in tasks_data]
+
 
 @app.get("/tasks/{task_id}", response_model=Task)
-def get_task(task_id: str):
+async def get_task_status(task_id: str):
     task_json = redis_client.get(f"task:{task_id}")
     if not task_json:
         # Тут можно добавить обработку ошибки 404

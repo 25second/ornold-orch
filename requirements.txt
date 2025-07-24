@@ -1,11 +1,8 @@
 fastapi
-uvicorn[standard]
+uvicorn
 requests
-numpy
-playwright
-redis
-celery
-chromadb
 python-dotenv
 beautifulsoup4
-flower 
+celery
+redis
+jinja2 
