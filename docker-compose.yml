@@ -82,9 +82,6 @@ services:
       - redis
       - api
     command: celery -A worker.celery_app worker --loglevel=info
-    depends_on:
-      - redis
-      - api
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.worker.rule=Host(`worker.ornold.com`)" # Пример, если нужен доступ
