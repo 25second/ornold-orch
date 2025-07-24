@@ -49,6 +49,19 @@ def get_task(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return Task.model_validate_json(task_json)
 
+
+@app.post("/tasks/{task_id}/stop", response_model=Task)
+async def stop_task(task_id: str):
+    """
+    Принудительно останавливает выполнение задачи.
+    """
+    logger.info(f"Получен запрос на остановку задачи {task_id}")
+    stopped_task_data = orchestrator_instance.stop_task(task_id)
+    if stopped_task_data is None:
+        raise HTTPException(status_code=404, detail=f"Задача с ID {task_id} не найдена для остановки")
+    return Task(**stopped_task_data, id=task_id)
+
+
 @app.post("/tasks/{task_id}/resume", response_model=Task)
 def resume_task(task_id: str, resume_request: ResumeTaskRequest):
     """
