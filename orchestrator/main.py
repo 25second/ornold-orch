@@ -7,7 +7,7 @@ import redis
 import os
 from .schemas import Task, TaskCreate, ResumeTaskRequest
 from .orchestrator import orchestrator_instance
-from worker import run_web_agent_task
+from worker import run_agent_task
 import logging
 
 # Получаем хост Redis из переменной окружения
@@ -72,13 +72,15 @@ def resume_task(task_id: str, resume_request: ResumeTaskRequest):
         raise HTTPException(status_code=400, detail="Не удалось найти browser_endpoint_url в контексте ошибки для возобновления.")
 
     # Создаем новый, простой план из одного действия, предоставленного оператором.
-    new_plan = [f"Действие от оператора: {resume_request.action.get('action')} на элементе {resume_request.action.get('element_id')}"]
+    # В новой архитектуре агент не использует "план", а действует по шагам.
+    # Мы можем передать ему новую цель.
+    new_goal = f"Возобновляю работу. Следующее действие, продиктованное человеком: {resume_request.action}"
 
     logger.info(f"Отправляю задачу на возобновление для эндпоинта: {browser_endpoint_url}")
-    run_web_agent_task.delay(
+    run_agent_task.delay(
         task_id=task.id,
-        browser_endpoint_url=browser_endpoint_url, 
-        plan=new_plan
+        goal=new_goal, 
+        initial_browser_endpoints=[browser_endpoint_url]
     )
 
     task.status = "queued"
