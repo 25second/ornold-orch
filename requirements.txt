@@ -7,4 +7,5 @@ redis
 celery
 chromadb
 python-dotenv
-beautifulsoup4 
+beautifulsoup4
+flower 

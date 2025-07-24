@@ -78,7 +78,7 @@ services:
     command: celery -A worker.celery_app worker --loglevel=info
 
   flower:
-    image: mher/flower:latest
+    build: . # Собираем из нашего Dockerfile, чтобы код был доступен
     container_name: ornold_flower
     # Мы должны явно указать приложение (-A) для мониторинга
     command: >
