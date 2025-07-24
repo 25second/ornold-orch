@@ -54,14 +54,12 @@ services:
     #   - "80:8000" 
     env_file:
       - .env # Подключаем файл с переменными окружения
-    restart: always
     depends_on:
       - redis
       - chromadb
     command: uvicorn orchestrator.main:app --host 0.0.0.0 --port 8000 --reload
     labels:
       - "traefik.enable=true"
-      # Основной API
       - "traefik.http.routers.ornold-api.rule=Host(`agent.ornold.com`)"
       - "traefik.http.routers.ornold-api.entrypoints=websecure"
       - "traefik.http.routers.ornold-api.tls.certresolver=myresolver"
@@ -75,11 +73,9 @@ services:
       - .env
     depends_on:
       - redis
+      - chromadb
       - api
     command: celery -A worker.celery_app worker --loglevel=info
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.worker.rule=Host(`worker.ornold.com`)" # Пример, если нужен доступ
 
 volumes:
   chroma_data:

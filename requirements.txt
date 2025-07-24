@@ -1,7 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 requests
-python-dotenv
-beautifulsoup4
+numpy
+playwright
+redis
 celery
-redis 
+chromadb
+python-dotenv
+beautifulsoup4 

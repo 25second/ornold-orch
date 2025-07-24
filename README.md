@@ -36,32 +36,6 @@ RUNPOD_ENDPOINT_ID_EMBEDDING=your_embedding_endpoint_id_here
 # Они позволяют контейнерам находить друг друга по именам сервисов.
 REDIS_HOST=redis
 CHROMADB_HOST=chromadb
-
-`CHROMA_DB_ENDPOINT_ID`: ID вашего эндпоинта ChromaDB на RunPod.
-`EMBEDDING_MODEL_ENDPOINT_ID`: ID вашего эндпоинта для модели эмбеддингов на RunPod.
-
-Также, для доступа к админ-панели, добавьте следующие переменные:
-
-`FLOWER_USER`: Имя пользователя для входа в админ-панель Flower.
-`FLOWER_PASSWORD`: Пароль для входа.
-
-Пример содержимого `.env`:
-
-```bash
-# .env
-
-# --- Ключи API ---
-RUNPOD_API_KEY=your_runpod_api_key_here
-RUNPOD_ENDPOINT_ID_GEMMA=your_gemma_endpoint_id_here
-RUNPOD_ENDPOINT_ID_EMBEDDING=your_embedding_endpoint_id_here
-
-# --- Настройки для Docker ---
-# Эти переменные используются, когда приложение запускается через docker-compose.
-# Они позволяют контейнерам находить друг друга по именам сервисов.
-REDIS_HOST=redis
-CHROMADB_HOST=chromadb
-FLOWER_USER=admin
-FLOWER_PASSWORD=supersecretpassword
 ```
 
 ### 4. Сборка и запуск
@@ -96,20 +70,3 @@ curl -X POST "http://localhost:8000/tasks" \
 ```bash
 docker-compose down
 ``` 
-
-## Использование
-
-### API
-
-Основной API будет доступен по вашему домену (`https://agent.ornold.com`).
-
-### Админ-панель
-
-Админ-панель для мониторинга и управления задачами будет доступна по домену `https://adminka.ornold.com`. Для входа используйте `FLOWER_USER` и `FLOWER_PASSWORD`, которые вы указали в `.env` файле.
-
-### Создание задачи
-```bash
-curl -X POST "https://agent.ornold.com/tasks/{task_id}/stop"
-```
-
-### Возобновление задачи (для Human-in-the-loop) 
