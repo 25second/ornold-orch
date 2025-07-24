@@ -128,6 +128,9 @@ class UniversalAgent:
             ws_url = ws_url.replace("127.0.0.1", parsed_endpoint.hostname)
             ws_url = ws_url.replace("localhost", parsed_endpoint.hostname)
             
+            # Убираем порт из WebSocket URL, так как туннель сам управляет портами
+            ws_url = ws_url.replace(":9992", "")
+            
             logger.info(f"Подключаюсь к WebSocket: {ws_url}")
             
             try:
