@@ -6,5 +6,5 @@ playwright
 redis
 celery
 chromadb
-sentence-transformers
-python-dotenv 
+python-dotenv
+beautifulsoup4 

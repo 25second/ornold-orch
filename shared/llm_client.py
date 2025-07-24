@@ -82,17 +82,43 @@ class GemmaClient:
         logger.error(f"Таймаут ожидания выполнения задачи {task_id}.")
         return {"error": "Таймаут ожидания ответа от LLM"}
 
-    def get_next_action(self, goal: str, page_context: dict) -> dict:
-        prompt = f"""
-        Ты - ИИ ассистент для веб-автоматизации.
-        Текущая цель: "{goal}"
-        Текущий URL: {page_context.get('url')}
-        Проанализируй дерево доступности (accessibility tree) ниже и реши, какое действие нужно совершить.
-        Дерево доступности:
-        {json.dumps(page_context.get('accessibility_tree'), indent=2, ensure_ascii=False)}
-        Верни ТОЛЬКО JSON объект со структурой: {{ "action": "...", "element_id": "...", "text": "...", "reasoning": "..." }}
+    def get_next_action(self, goal: str, url: str, marked_html: str, previous_actions: list) -> dict:
         """
-        return self._run_and_poll_task(prompt)
+        Формирует промпт для LLM, чтобы получить следующее действие.
+        """
+        prompt = f"""
+Ты — продвинутый ИИ-ассистент, управляющий браузером.
+Твоя текущая цель: "{goal}".
+Ты находишься на странице: {url}.
+
+Вот размеченное содержимое страницы (только body, без script и style), где каждому интерактивному элементу присвоен 'data-ornold-id':
+---
+{marked_html}
+---
+
+Твои последние действия (для контекста): {previous_actions}
+
+Твоя задача — определить **одно** следующее действие для достижения цели.
+Доступные действия: "click", "type".
+Для действия "type" обязательно укажи "text".
+Верни ответ в формате JSON. Пример:
+{{"action": "click", "element_id": "15"}}
+или
+{{"action": "type", "element_id": "23", "text": "my-secret-password"}}
+
+Если цель достигнута или не может быть достигнута с текущими элементами, верни:
+{{"action": "finish", "reason": "Цель достигнута"}}
+"""
+        
+        logger.info("Запрос к LLM для получения следующего действия...")
+        # logger.debug(f"Промпт для LLM: {prompt}") # Можно раскомментировать для отладки
+
+        payload = {
+            "input": {
+                "prompt": prompt
+            }
+        }
+        return self._run_and_poll_task(payload)
 
     def classify_error(self, error_context: str) -> dict:
         prompt = f"""

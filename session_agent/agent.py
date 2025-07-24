@@ -6,6 +6,7 @@ import redis
 import json
 import logging
 from shared.llm_client import llm_client
+from shared.dom_processor import mark_interactive_elements
 from typing import Optional
 
 redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -35,28 +36,32 @@ class SessionAgent:
 
     async def get_perception_data(self) -> dict:
         """
-        Собирает данные со страницы для отправки в LLM.
+        Получает информацию со страницы (URL, размеченный HTML)
         """
         if not self.page:
             return {}
-            
-        page_content = await self.page.content()
-        accessibility_snapshot = await self.page.accessibility.snapshot()
+        
+        raw_html = await self.page.content()
+        marked_html = mark_interactive_elements(raw_html)
 
         return {
             "url": self.page.url,
-            "html_content": page_content,
-            "accessibility_tree": accessibility_snapshot
+            "marked_html": marked_html,
         }
 
-    async def _decide_next_action(self, current_step: str, perception_data: dict) -> dict:
+    async def _decide_next_action(self, step_goal: str, perception_data: dict) -> dict:
         """
         Принимает решение о следующем действии, используя LLM.
         """
-        logger.info(f"Принимаю решение для шага '{current_step}'...")
+        logger.info(f"Принимаю решение для шага '{step_goal}'...")
 
         # Вызов реального клиента (теперь синхронный)
-        llm_response = llm_client.get_next_action(current_step, perception_data)
+        llm_response = llm_client.get_next_action(
+            goal=step_goal,
+            url=perception_data.get("url"),
+            marked_html=perception_data.get("marked_html"),
+            previous_actions=self.action_history
+        )
         
         logger.info(f"Решение от LLM принято: {llm_response}")
         return llm_response
@@ -150,24 +155,39 @@ class SessionAgent:
 
 
     async def _execute_action(self, action: dict):
-        """
-        Выполняет действие, полученное от LLM.
-        """
+        if not self.page:
+            logger.error("Невозможно выполнить действие: страница не найдена.")
+            return
+
         action_type = action.get("action")
+        # Теперь element_id - это наш надежный 'data-ornold-id'
         element_id = action.get("element_id")
         
-        print(f"Агент {self.task_id}: Подготовка к действию '{action_type}' на элементе '{element_id}'")
+        logger.info(f"Агент {self.task_id}: Подготовка к действию '{action_type}' на элементе с ID '{element_id}'")
 
-        if action_type == "click":
-            await self._human_like_click(element_id)
-        elif action_type == "type":
-            text_to_type = action.get("text", "")
-            await self._human_like_type(element_id, text_to_type)
-        else:
-            print(f"Агент {self.task_id}: Неизвестное действие '{action_type}'")
+        # Формируем надежный селектор
+        selector = f"[data-ornold-id='{element_id}']"
         
-        # Добавляем действие в историю
-        self.action_history.append(action)
+        try:
+            if action_type == "click":
+                await self._human_like_click(selector)
+            elif action_type == "type":
+                text_to_type = action.get("text")
+                if text_to_type is None:
+                    logger.error(f"Действие 'type' для элемента {selector} не содержит текста.")
+                    return
+                await self._human_like_type(selector, text_to_type)
+            else:
+                logger.error(f"Агент {self.task_id}: Неизвестное действие '{action_type}'")
+                return # Возвращаемся, чтобы не добавлять невалидное действие в историю
+
+            # Добавляем успешно ВЫПОЛНЕННОЕ действие в историю
+            self.action_history.append(action)
+            logger.info(f"Действие '{action_type}' на элементе {selector} успешно выполнено.")
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении действия '{action_type}' на элементе {selector}: {e}")
+            # Ошибка будет обработана в цикле run_task через _verify_state_after_action
+            raise
 
     async def _human_like_click(self, selector: str):
         """
