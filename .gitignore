@@ -1,0 +1,19 @@
+# Файлы окружения
+.env
+*.env
+
+# Базы данных
+/chroma_db/
+
+# Python кэш и артефакты
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+
+# Celery файлы
+celerybeat-schedule
+*.pid 

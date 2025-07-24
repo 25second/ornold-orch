@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+requests
+numpy
+playwright
+redis
+celery
+chromadb
+sentence-transformers
+python-dotenv 

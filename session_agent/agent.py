@@ -1,0 +1,267 @@
+import asyncio
+from playwright.async_api import async_playwright, Browser, Page
+import random
+from shared.memory import rag_memory_instance
+import redis
+import json
+import logging
+from shared.llm_client import llm_client
+
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+logger = logging.getLogger(__name__)
+
+class SessionAgent:
+    def __init__(self, task_id: str, profile_id: str, cdp_port: int):
+        self.task_id = task_id
+        self.profile_id = profile_id
+        self.cdp_port = cdp_port
+        self.status = "idle"
+        self.browser: Browser | None = None
+        self.page: Page | None = None
+        self.action_history: list[dict] = []
+        logger.info(f"Агент для профиля {self.profile_id} (задача {self.task_id}) создан. Порт: {self.cdp_port}")
+
+    async def connect_to_browser(self):
+        """
+        Подключается к запущенному браузеру по CDP.
+        """
+        print(f"Агент {self.profile_id}: Подключаюсь к браузеру на порту {self.cdp_port}...")
+        try:
+            p = await async_playwright().start()
+            self.browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{self.cdp_port}")
+            # Берем первую открытую вкладку. В реальности тут может быть более сложная логика.
+            self.page = self.browser.contexts[0].pages[0]
+            print(f"Агент {self.profile_id}: Успешно подключился. Текущая страница: {self.page.url}")
+            return True
+        except Exception as e:
+            print(f"Агент {self.profile_id}: Не удалось подключиться к браузеру. Ошибка: {e}")
+            return False
+
+    async def get_perception_data(self) -> dict:
+        """
+        Собирает данные со страницы для отправки в LLM.
+        """
+        if not self.page:
+            return {}
+            
+        page_content = await self.page.content()
+        accessibility_snapshot = await self.page.accessibility.snapshot()
+
+        return {
+            "url": self.page.url,
+            "html_content": page_content,
+            "accessibility_tree": accessibility_snapshot
+        }
+
+    async def _decide_next_action(self, current_step: str, perception_data: dict) -> dict:
+        """
+        Принимает решение о следующем действии, используя LLM.
+        """
+        logger.info(f"Принимаю решение для шага '{current_step}'...")
+
+        # Вызов реального клиента (теперь синхронный)
+        llm_response = llm_client.get_next_action(current_step, perception_data)
+        
+        logger.info(f"Решение от LLM принято: {llm_response}")
+        return llm_response
+
+    async def _verify_state_after_action(self, action: dict) -> bool:
+        """
+        Проверяет состояние страницы после действия на предмет аномалий.
+        Возвращает True, если все в порядке, и False, если обнаружена аномалия.
+        """
+        if not self.page:
+            return False
+
+        # Простая проверка на слова-маркеры ошибок
+        error_keywords = ["error", "ошибка", "fail", "неверный", "invalid"]
+        page_text = await self.page.content()
+        page_lower = page_text.lower()
+
+        for keyword in error_keywords:
+            if keyword in page_lower:
+                error_context = f"Обнаружено ключевое слово ошибки: '{keyword}' после действия {action}"
+                print(error_context)
+                rag_memory_instance.add_failure_log(error_context, str(action), False)
+                return False
+        
+        # В будущем здесь будут более сложные проверки (HTTP-статусы, модальные окна и т.д.)
+        print("Проверка после действия: Аномалий не обнаружено.")
+        return True
+
+    async def _classify_anomaly(self, error_context: str) -> dict:
+        """
+        Отправляет контекст аномалии в LLM для классификации.
+        """
+        logger.info(f"Классифицирую аномалию: '{error_context[:100]}...'")
+        # Вызов реального клиента (теперь синхронный)
+        classification_result = llm_client.classify_error(error_context)
+        return classification_result
+
+
+    async def _start_recovery_protocol(self, error_context: str):
+        """
+        Запускает протокол восстановления после обнаружения аномалии.
+        """
+        classification = await self._classify_anomaly(error_context)
+        print(f"Агент {self.profile_id}: Аномалия классифицирована: {classification}")
+
+        recovery_strategy = classification.get("recommended_recovery")
+        
+        print(f"Запускаю стратегию восстановления: '{recovery_strategy}'...")
+
+        if recovery_strategy == "micro_rollback":
+            last_action = self.action_history[-1] if self.action_history else None
+            if last_action:
+                print(f"Выполняю 'микро-откат': повторяю действие {last_action}")
+                # Повторяем действие и снова проверяем состояние
+                await self._execute_action(last_action)
+                if not await self._verify_state_after_action(last_action):
+                    print("Микро-откат не помог.")
+                    await self._request_human_intervention("Микро-откат не помог.", last_action)
+                else:
+                    print("Микро-откат прошел успешно!")
+                    # Здесь нужно будет придумать, как вернуться в основной цикл
+            else:
+                print("Не могу выполнить микро-откат: история действий пуста.")
+        
+        elif recovery_strategy == "step_rollback":
+            print("Стратегия 'шаг-откат' пока не реализована.")
+        
+        elif recovery_strategy == "session_rollback":
+            print("Стратегия 'сессионный откат' пока не реализована.")
+            await self._request_human_intervention("Требуется сессионный откат.", self.action_history[-1])
+
+    async def _request_human_intervention(self, reason: str, failed_action: dict | None = None):
+        """
+        Помечает задачу как требующую вмешательства человека.
+        Сохраняет контекст для возобновления.
+        """
+        print(f"Агент {self.profile_id}: Запрашиваю вмешательство человека. Причина: {reason}")
+        
+        task_json = redis_client.get(f"task:{self.task_id}")
+        if task_json:
+            task_data = json.loads(task_json)
+            task_data['status'] = 'human_intervention_required'
+            task_data['status_reason'] = reason
+            task_data['failed_action_context'] = failed_action
+            
+            redis_client.set(f"task:{self.task_id}", json.dumps(task_data))
+
+
+    async def _execute_action(self, action: dict):
+        """
+        Выполняет действие, полученное от LLM.
+        """
+        action_type = action.get("action")
+        element_id = action.get("element_id")
+        
+        print(f"Агент {self.profile_id}: Подготовка к действию '{action_type}' на элементе '{element_id}'")
+
+        if action_type == "click":
+            await self._human_like_click(element_id)
+        elif action_type == "type":
+            text_to_type = action.get("text", "")
+            await self._human_like_type(element_id, text_to_type)
+        else:
+            print(f"Агент {self.profile_id}: Неизвестное действие '{action_type}'")
+        
+        # Добавляем действие в историю
+        self.action_history.append(action)
+
+    async def _human_like_click(self, selector: str):
+        """
+        Кликает на элемент, имитируя человеческое поведение.
+        """
+        if not self.page:
+            print("Ошибка: страница не найдена.")
+            return
+
+        print(f"Имитация 'человечного' клика на '{selector}'...")
+        try:
+            # Движение мыши к элементу. Playwright делает это достаточно плавно.
+            # Для большей реалистичности можно было бы использовать page.mouse.move
+            # с промежуточными точками, но click() с опциями - хороший старт.
+            await self.page.click(
+                selector,
+                delay=random.uniform(50, 150), # Задержка между mousedown и mouseup
+                button='left',
+                click_count=1
+            )
+            print("Кликнул!")
+        except Exception as e:
+            error_context = f"Не удалось кликнуть на '{selector}': {e}"
+            print(error_context)
+            rag_memory_instance.add_failure_log(error_context, "просто кликнуть", False)
+            # Здесь в будущем будет запускаться механизм восстановления
+
+    async def _human_like_type(self, selector: str, text: str):
+        """
+        Печатает текст в элемент посимвольно, как человек.
+        """
+        if not self.page:
+            print("Ошибка: страница не найдена.")
+            return
+
+        print(f"Имитация 'человечного' ввода текста '{text}' в '{selector}'...")
+        try:
+            # Сначала кликаем, чтобы сфокусироваться
+            await self._human_like_click(selector)
+            
+            # Playwright умеет имитировать задержки, но сделаем это вручную для полного контроля
+            element = self.page.locator(selector)
+            for char in text:
+                await element.press(char, delay=random.uniform(50, 200))
+
+            print("Напечатал!")
+        except Exception as e:
+            error_context = f"Не удалось напечатать в '{selector}': {e}"
+            print(error_context)
+            rag_memory_instance.add_failure_log(error_context, "кликнуть и печатать", False)
+            # Здесь в будущем будет запускаться механизм восстановления
+
+    async def run_task(self, plan: list[str]):
+        """
+        Запускает выполнение плана для этого сессионного агента.
+        """
+        self.status = "running"
+        print(f"Агент {self.profile_id} начинает выполнение плана: {plan}")
+        
+        if not self.browser or not self.page:
+            is_connected = await self.connect_to_browser()
+            if not is_connected:
+                self.status = "failed"
+                return
+
+        for step in plan:
+            print(f"--- Агент {self.profile_id}: Выполняю шаг '{step}' ---")
+            
+            # 1. Восприятие
+            perception_data = await self.get_perception_data()
+            print(f"URL: {perception_data.get('url')}")
+
+            # 2. Решение
+            action = await self._decide_next_action(step, perception_data)
+
+            # 3. Действие
+            await self._execute_action(action)
+
+            # 4. Проверка состояния
+            if not await self._verify_state_after_action(action):
+                # Вместо простого break, запускаем протокол восстановления
+                page_text = await self.page.content()
+                await self._start_recovery_protocol(page_text[-500:]) # Передаем последний кусок страницы
+                break 
+
+
+        self.status = "finished"
+        print(f"Агент {self.profile_id} завершил выполнение плана.")
+
+# --- Пример использования (для тестирования) ---
+async def main():
+    # Запустите ваш браузер с флагом --remote-debugging-port=9222
+    agent = SessionAgent(task_id="test_task_id", profile_id="test_profile", cdp_port=9222)
+    await agent.run_task(["Шаг 1: Проверить подключение"])
+
+if __name__ == "__main__":
+    asyncio.run(main()) 
