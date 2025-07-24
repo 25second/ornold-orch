@@ -4,17 +4,19 @@ import uuid
 import json
 from typing import List
 import redis
+import os
 from .schemas import Task, TaskCreate, ResumeTaskRequest
 from .orchestrator import orchestrator_instance
 from worker import run_web_agent_task
 import logging
 
+# Получаем хост Redis из переменной окружения
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Web Agent Orchestrator")
-
-# Подключаемся к Redis
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
 
 @app.get("/")

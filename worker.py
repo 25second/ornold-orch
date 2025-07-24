@@ -2,12 +2,16 @@ import shared.logging_config
 from celery import Celery
 from session_agent.agent import SessionAgent
 import asyncio
+import os
+
+# Получаем хост Redis из переменной окружения, по умолчанию 'localhost'
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 
 # Настраиваем Celery. Используем Redis в качестве брокера и бэкенда для результатов.
 celery_app = Celery(
     'tasks',
-    broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    broker=f'redis://{REDIS_HOST}:6379/0',
+    backend=f'redis://{REDIS_HOST}:6379/0'
 )
 
 @celery_app.task

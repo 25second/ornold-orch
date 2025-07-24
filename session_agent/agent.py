@@ -8,9 +8,17 @@ import logging
 from shared.llm_client import llm_client
 from shared.dom_processor import mark_interactive_elements
 from typing import Optional
+import os
+from dotenv import load_dotenv
 
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+load_dotenv()
 logger = logging.getLogger(__name__)
+
+# Получаем хосты из переменных окружения
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
+
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
 class SessionAgent:
     def __init__(self, task_id: str, browser_endpoint_url: str):

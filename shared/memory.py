@@ -10,11 +10,14 @@ import hashlib
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Получаем хост ChromaDB из переменной окружения
+CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
+
 class RAGMemory:
     def __init__(self):
         # --- Подключение к ChromaDB как к серверу ---
-        self.client = chromadb.HttpClient(host="localhost", port=8001)
-        logger.info("RAG Memory: Подключение к серверу ChromaDB на http://localhost:8001")
+        self.client = chromadb.HttpClient(host=CHROMADB_HOST, port=8000)
+        logger.info(f"RAG Memory: Подключение к серверу ChromaDB на http://{CHROMADB_HOST}:8000")
         
         # Коллекция для успешных сценариев (как было)
         self.scenarios_collection = self.client.get_or_create_collection(

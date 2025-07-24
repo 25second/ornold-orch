@@ -1,13 +1,51 @@
 version: '3.8'
 
 services:
+  # 1. Сервис Redis для Celery и хранения состояния
+  redis:
+    image: redis:7-alpine
+    container_name: ornold_redis
+    ports:
+      - "6379:6379"
+
+  # 2. Сервер векторной базы данных
   chromadb:
     image: chromadb/chroma:latest
     container_name: ornold_chromadb
     ports:
-      - "8001:8000" # Прокидываем порт 8000 контейнера на 8001 хоста
+      - "8001:8000"
     volumes:
       - ./chroma_data:/chroma/.chroma/
     environment:
       - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE 
+      - ANONYMIZED_TELEMETRY=FALSE
+    depends_on:
+      - redis
+
+  # 3. API Оркестратора (FastAPI)
+  api:
+    build: . # Собираем из Dockerfile в текущей директории
+    container_name: ornold_api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env # Подключаем файл с переменными окружения
+    depends_on:
+      - redis
+      - chromadb
+    command: uvicorn orchestrator.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 4. Воркер (Celery)
+  worker:
+    build: . # Используем тот же образ, что и для API
+    container_name: ornold_worker
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - chromadb
+      - api
+    command: celery -A worker.celery_app worker --loglevel=info
+
+volumes:
+  chroma_data: 
