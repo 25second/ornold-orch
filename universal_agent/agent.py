@@ -3,6 +3,8 @@ import logging
 import json
 import redis
 import os
+import requests
+import urllib.parse
 from typing import List, Optional
 
 # --- Конфигурация ---
@@ -21,24 +23,32 @@ class MagnitudeAgent:
         self.update_task_status("in_progress")
 
         # --- Конфигурация Magnitude ---
-        # Magnitude использует свои переменные окружения.
-        # Убедитесь, что MAGNITUDE_API_KEY и другие нужные переменные установлены.
-        # В данном случае, мы предполагаем, что он может работать с OpenAI-совместимым API.
         os.environ["OPENAI_API_KEY"] = os.getenv("RUNPOD_API_KEY")
         os.environ["OPENAI_API_BASE"] = f"https://api.runpod.ai/v2/{os.getenv('RUNPOD_ENDPOINT_ID_GEMMA')}/openai/v1"
 
         try:
-            # Если есть эндпоинт, подключаемся к нему. Иначе Magnitude создаст свой браузер.
-            cdp_endpoint = None
+            browser_options = {}
             if self.browser_endpoints:
-                # Magnitude, скорее всего, ожидает прямой CDP эндпоинт (ws://...), а не HTTP.
-                # Для простоты, пока оставим эту логику как есть, но возможно, ее нужно будет адаптировать.
-                # На данный момент, документация Magnitude не описывает прямого подключения к CDP.
-                # Поэтому мы пока будем игнорировать эндпоинты и позволим Magnitude управлять браузером.
-                logger.warning("Подключение к удаленному браузеру пока не реализовано для Magnitude. Запускаю новый браузер.")
+                endpoint = self.browser_endpoints[0]
+                logger.info(f"Подключаюсь к удаленному браузеру по эндпоинту: {endpoint}")
+                
+                # Magnitude ожидает HTTP-адрес для CDP, а не WebSocket URL.
+                # Мы просто берем хост и порт из вашего эндпоинта.
+                parsed_url = urllib.parse.urlparse(endpoint)
+                
+                # Получаем порт из WebSocket URL, который отдает браузер
+                response = requests.get(endpoint)
+                ws_url = response.json().get("webSocketDebuggerUrl")
+                ws_port = urllib.parse.urlparse(ws_url).port
 
-            agent = BrowserAgent()
-            agent.goto(self.goal) # Magnitude может сам понять, что нужно перейти на сайт
+                cdp_address = f"http://{parsed_url.hostname}:{ws_port}"
+                logger.info(f"Использую CDP адрес: {cdp_address}")
+                browser_options["cdp"] = cdp_address
+            else:
+                logger.info("Эндпоинты не предоставлены, Magnitude запустит свой браузер.")
+
+            agent = BrowserAgent(browser=browser_options)
+            agent.goto(self.goal)
             
             final_result = f"Magnitude успешно выполнил цель: {self.goal}"
             logger.info(final_result)
