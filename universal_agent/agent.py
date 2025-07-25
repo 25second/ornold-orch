@@ -158,6 +158,11 @@ class UniversalAgent:
                 logger.error(f"Ошибка при подключении к браузеру: {e}")
                 raise ConnectionError(f"Не удалось подключиться к браузеру: {e}")
 
+        # Добавляем протокол, если его нет
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            logger.info(f"Добавлен протокол https:// к URL: {url}")
+
         logger.info(f"Агент {self.task_id} переходит по URL: {url}")
         await self.page.goto(url)
 
