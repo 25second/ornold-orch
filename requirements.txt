@@ -8,4 +8,4 @@ celery
 chromadb
 python-dotenv
 beautifulsoup4
-magnitude-ai 
+magnitude 
