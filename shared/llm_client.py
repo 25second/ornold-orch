@@ -127,31 +127,22 @@ class GemmaClient:
         """
         # Собираем всю инструкцию в один большой промпт, как того требует API.
         full_prompt = f"""
-Ты — мозг автономного универсального агента.
-Твоя главная цель: "{goal}"
+Ты — агент для управления браузером.
+Цель: "{goal}"
 
-# СТРОГО ДОСТУПНЫЕ ДЕЙСТВИЯ (НИКАКИХ ДРУГИХ!)
-1.  `{{ "action": "think", "text": "...", "reasoning": "..." }}`
-2.  `{{ "action": "browse", "url": "...", "reasoning": "..." }}`
-3.  `{{ "action": "click", "element_id": "...", "reasoning": "..." }}`
-4.  `{{ "action": "type", "element_id": "...", "text": "...", "reasoning": "..." }}`
-5.  `{{ "action": "finish", "result": "...", "reasoning": "..." }}`
+ДОСТУПНЫЕ ДЕЙСТВИЯ (ТОЛЬКО ЭТИ 5!):
+1. {{"action": "think", "text": "...", "reasoning": "..."}}
+2. {{"action": "browse", "url": "...", "reasoning": "..."}}  
+3. {{"action": "click", "element_id": "...", "reasoning": "..."}}
+4. {{"action": "type", "element_id": "...", "text": "...", "reasoning": "..."}}
+5. {{"action": "finish", "result": "...", "reasoning": "..."}}
 
-ЗАПРЕЩЕНО создавать действия типа: show_geolocation_popup, allow_geolocation, dismiss_popup, accept_cookies, или любые другие!
+ЗАПРЕЩЕНО: extract_concert_details, extract_event_details, show_popup, или любые другие действия!
 
-# Примеры правильных ответов:
-- Если видишь popup: `{{ "action": "click", "element_id": "123", "reasoning": "Кликаю на кнопку 'Отклонить' чтобы закрыть popup" }}`
-- Если нужно найти элемент: `{{ "action": "think", "text": "Ищу поле поиска на странице", "reasoning": "Анализирую HTML для поиска нужного элемента" }}`
-- Если видишь поле ввода: `{{ "action": "type", "element_id": "456", "text": "мой запрос", "reasoning": "Ввожу текст в найденное поле" }}`
+История: {history[-3:]}
+Состояние: {json.dumps(perception, ensure_ascii=False)}
 
-# Контекст
-Твоя история действий (последние 10): {history[-10:]}
-Твое текущее восприятие мира:
-{json.dumps(perception, indent=2, ensure_ascii=False)}
-
-# Задача
-Определи **одно** следующее действие из 5 разрешенных выше.
-Ответ СТРОГО в формате JSON без дополнительного текста:
+Ответь ТОЛЬКО JSON одного из 5 действий выше:
 """
         logger.info("Запрос к LLM (формат 'prompt')...")
         

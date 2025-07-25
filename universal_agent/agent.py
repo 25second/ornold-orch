@@ -69,7 +69,14 @@ class UniversalAgent:
         }
         if self.page:
             raw_html = await self.page.content()
-            perception["marked_html"] = mark_interactive_elements(raw_html)
+            marked_html = mark_interactive_elements(raw_html)
+            
+            # Ограничиваем размер HTML для LLM (максимум 8000 символов)
+            if len(marked_html) > 8000:
+                marked_html = marked_html[:8000] + "\n... [HTML обрезан для экономии токенов] ..."
+                logger.info(f"HTML обрезан с {len(raw_html)} до 8000 символов для LLM")
+            
+            perception["marked_html"] = marked_html
         
         return perception
 
