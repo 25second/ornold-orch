@@ -8,6 +8,4 @@ celery
 chromadb
 python-dotenv
 beautifulsoup4
-lavague
-lavague-llms-ollama
-lavague-drivers-playwright 
+magnitude-ai 

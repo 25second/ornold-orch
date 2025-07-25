@@ -8,6 +8,8 @@ WORKDIR /app
 # Этот шаг кэшируется, чтобы не переустанавливать зависимости при каждом изменении кода
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Устанавливаем браузеры для Playwright
+RUN playwright install --with-deps
 
 # 4. Копирование всего остального кода приложения
 COPY . .
