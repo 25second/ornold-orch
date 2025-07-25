@@ -1,6 +1,6 @@
 from lavague import LaVague, Action, WorldModel
 from lavague_drivers.playwright import PlaywrightDriver
-from lavague_llms.openai import OpenAI
+from lavague_llms.ollama import Ollama
 import logging
 import json
 import redis
@@ -14,14 +14,16 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 logger = logging.getLogger(__name__)
 
-# --- Настройка LLM для LaVague ---
-openai_llm = OpenAI(
-    model_name="gemma3:12b",
-    api_key=os.getenv("RUNPOD_API_KEY"),
-    api_base=f"https://api.runpod.ai/v2/{os.getenv('RUNPOD_ENDPOINT_ID_GEMMA')}/openai/v1"
+# --- Настройка LLM для LaVague (Ollama) ---
+ollama_llm = Ollama(
+    llm_config={
+        "model": "gemma3:12b",  # Название вашей модели
+        "base_url": f"https://api.runpod.ai/v2/{os.getenv('RUNPOD_ENDPOINT_ID_GEMMA')}/openai/v1",
+        "api_key": os.getenv("RUNPOD_API_KEY"),
+    }
 )
-world_model = WorldModel(openai_llm)
-action_engine = Action(openai_llm)
+world_model = WorldModel(ollama_llm)
+action_engine = Action(ollama_llm)
 
 class LaVagueAgent:
     def __init__(self, task_id: str, goal: str, browser_endpoints: Optional[List[str]] = None):

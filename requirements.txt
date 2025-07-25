@@ -9,5 +9,5 @@ chromadb
 python-dotenv
 beautifulsoup4
 lavague
-lavague-llms-openai
+lavague-llms-ollama
 lavague-drivers-playwright 
