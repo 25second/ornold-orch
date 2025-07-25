@@ -1,193 +1,93 @@
-import asyncio
-import json
+from lavague import LaVague, Action, WorldModel
+from lavague_drivers.playwright import PlaywrightDriver
+from lavague_llms.openai import OpenAI
 import logging
+import json
 import redis
-from playwright.async_api import async_playwright, Browser, Page
-from typing import Optional, List
-
-from shared.llm_client import llm_client
-from shared.dom_processor import mark_interactive_elements
-from shared.memory import rag_memory_instance
 import os
+import requests
+import urllib.parse
+from typing import List, Optional
 
-# --- Клиенты и логгер ---
+# --- Конфигурация ---
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 logger = logging.getLogger(__name__)
 
-class UniversalAgent:
-    def __init__(self, task_id: str, goal: str, initial_browser_endpoints: List[str]):
+# --- Настройка LLM для LaVague ---
+openai_llm = OpenAI(
+    model_name="gemma3:12b",
+    api_key=os.getenv("RUNPOD_API_KEY"),
+    api_base=f"https://api.runpod.ai/v2/{os.getenv('RUNPOD_ENDPOINT_ID_GEMMA')}/openai/v1"
+)
+world_model = WorldModel(openai_llm)
+action_engine = Action(openai_llm)
+
+class LaVagueAgent:
+    def __init__(self, task_id: str, goal: str, browser_endpoints: Optional[List[str]] = None):
         self.task_id = task_id
         self.goal = goal
-        self.available_browser_endpoints = initial_browser_endpoints
-        
-        # Внутреннее состояние агента
-        self.internal_thoughts: List[str] = []
-        self.history: List[dict] = []
-        self.is_finished = False
-        
-        # Состояние браузера (инициализируется как None)
-        self.browser: Optional[Browser] = None
-        self.page: Optional[Page] = None
+        self.browser_endpoints = browser_endpoints
+        self.driver = None
 
-    async def run(self):
-        logger.info(f"Агент {self.task_id} начинает работу над целью: '{self.goal}'")
-        self.update_task_status("in_progress")
+    def _connect_to_browser(self):
+        """Подключается к удаленному браузеру, если предоставлен эндпоинт."""
+        if not self.browser_endpoints:
+            logger.info("Эндпоинты не предоставлены, LaVague запустит свой браузер.")
+            self.driver = PlaywrightDriver() # LaVague создаст свой браузер
+            return
 
-        while not self.is_finished:
-            # 1. Агент "думает", какое действие совершить следующим
-            next_action = await self._decide_next_action()
-            self.history.append(next_action)
-            
-            # 2. Агент выполняет действие
-            await self._execute_action(next_action)
-
-        logger.info(f"Агент {self.task_id} завершил работу.")
-
-    async def _decide_next_action(self) -> dict:
-        """Основной мыслительный цикл агента."""
-        # Здесь мы могли бы сначала искать в памяти похожие задачи,
-        # но для простоты пока будем всегда обращаться к LLM.
-        
-        # Получаем текущее "восприятие" мира
-        perception = await self._get_perception_data()
-
-        # Оборачиваем синхронный вызов в асинхронную функцию
-        return await asyncio.to_thread(
-            llm_client.get_next_action_universal,
-            goal=self.goal,
-            history=self.history,
-            perception=perception
-        )
-
-    async def _get_perception_data(self) -> dict:
-        """Собирает текущее состояние мира для агента."""
-        perception = {
-            "browser_open": self.page is not None,
-            "current_url": self.page.url if self.page else None,
-            "marked_html": None
-        }
-        if self.page:
-            raw_html = await self.page.content()
-            marked_html = mark_interactive_elements(raw_html)
-            
-            # Ограничиваем размер HTML для LLM (максимум 8000 символов)
-            if len(marked_html) > 8000:
-                marked_html = marked_html[:8000] + "\n... [HTML обрезан для экономии токенов] ..."
-                logger.info(f"HTML обрезан с {len(raw_html)} до 8000 символов для LLM")
-            
-            perception["marked_html"] = marked_html
-        
-        return perception
-
-    async def _execute_action(self, action: dict):
-        action_type = action.get("action")
-        logger.info(f"Агент {self.task_id} выполняет действие: {action_type}")
+        endpoint = self.browser_endpoints[0]
+        logger.info(f"Подключаюсь к удаленному браузеру по эндпоинту: {endpoint}")
 
         try:
-            if action_type == "think":
-                self.internal_thoughts.append(action.get("text", ""))
-            
-            elif action_type == "browse":
-                await self._action_browse(action.get("url"))
-
-            elif action_type == "click":
-                await self._action_click(action.get("element_id"))
-            
-            elif action_type == "type":
-                await self._action_type(action.get("element_id"), action.get("text"))
-
-            elif action_type == "finish":
-                self._action_finish(action.get("result"))
-            
-            else:
-                # Вместо падения, логируем неизвестное действие и продолжаем как "think"
-                logger.warning(f"Неизвестный тип действия: {action_type}. Обрабатываю как 'think'.")
-                self.internal_thoughts.append(f"LLM предложил неизвестное действие: {action}. Нужно переосмыслить задачу.")
-
-        except Exception as e:
-            logger.error(f"Ошибка при выполнении действия {action}: {e}")
-            # Здесь можно будет встроить старый механизм восстановления
-            self.update_task_status("error", status_reason=str(e))
-            self.is_finished = True
-
-    # --- Реализации действий ---
-
-    async def _action_browse(self, url: str):
-        if not self.browser:
-            if not self.available_browser_endpoints:
-                raise ConnectionError("Агент решил использовать браузер, но ему не предоставили эндпоинт.")
-            
-            # Берем первый доступный эндпоинт
-            endpoint = self.available_browser_endpoints.pop(0)
-            logger.info(f"Агент {self.task_id} запрашивает браузер, подключаюсь к {endpoint}...")
-            
-            # Получаем правильный WebSocket URL, заменяя localhost на публичный хост
-            import requests
-            response = requests.get(endpoint)
+            response = requests.get(endpoint, timeout=20)
+            response.raise_for_status()
             browser_info = response.json()
             ws_url = browser_info.get("webSocketDebuggerUrl")
             
             if not ws_url:
                 raise ConnectionError(f"Не удалось получить webSocketDebuggerUrl из {endpoint}")
             
-            # Заменяем 127.0.0.1 на хост из endpoint'а
-            import urllib.parse
             parsed_endpoint = urllib.parse.urlparse(endpoint)
-            ws_url = ws_url.replace("127.0.0.1", parsed_endpoint.hostname)
-            ws_url = ws_url.replace("localhost", parsed_endpoint.hostname)
+            ws_url = ws_url.replace("127.0.0.1", parsed_endpoint.hostname).replace("localhost", parsed_endpoint.hostname)
             
-            # Убираем порт из WebSocket URL, так как туннель сам управляет портами
-            ws_url = ws_url.replace(":9992", "")
+            # Убираем порт, если он есть
+            parsed_ws_url = urllib.parse.urlparse(ws_url)
+            if parsed_ws_url.port:
+                ws_url = parsed_ws_url._replace(netloc=parsed_ws_url.hostname).geturl()
+
+            logger.info(f"Итоговый WebSocket URL для подключения: {ws_url}")
+            self.driver = PlaywrightDriver(cdp=ws_url)
+
+        except Exception as e:
+            logger.error(f"Не удалось подключиться к удаленному браузеру: {e}")
+            raise # Перебрасываем исключение, чтобы задача упала с ошибкой
+
+    def run(self):
+        logger.info(f"Агент LaVague {self.task_id} начинает работу над целью: '{self.goal}'")
+        self.update_task_status("in_progress")
+
+        try:
+            self._connect_to_browser()
+            lavague_instance = LaVague(self.driver, action_engine, world_model)
+            lavague_instance.run(self.goal)
             
-            logger.info(f"Подключаюсь к WebSocket: {ws_url}")
-            
-            try:
-                p = await async_playwright().start()
-                # Добавляем таймаут на подключение (30 секунд)
-                self.browser = await asyncio.wait_for(
-                    p.chromium.connect_over_cdp(ws_url),
-                    timeout=30.0
-                )
-                self.page = self.browser.contexts[0].pages[0]
-                logger.info(f"Успешно подключился к браузеру")
-            except asyncio.TimeoutError:
-                logger.error(f"Таймаут при подключении к WebSocket {ws_url}")
-                raise ConnectionError(f"Таймаут при подключении к браузеру через {ws_url}")
-            except Exception as e:
-                logger.error(f"Ошибка при подключении к браузеру: {e}")
-                raise ConnectionError(f"Не удалось подключиться к браузеру: {e}")
+            final_result = f"LaVague успешно выполнил цель: {self.goal}"
+            logger.info(final_result)
+            self.update_task_status("completed", result=final_result)
 
-        # Добавляем протокол, если его нет
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-            logger.info(f"Добавлен протокол https:// к URL: {url}")
-
-        logger.info(f"Агент {self.task_id} переходит по URL: {url}")
-        await self.page.goto(url)
-
-    async def _action_click(self, element_id: str):
-        if not self.page: raise ConnectionError("Нельзя кликнуть, браузер не открыт.")
-        selector = f"[data-ornold-id='{element_id}']"
-        # Здесь можно вернуть human_like_click
-        await self.page.locator(selector).click()
-
-    async def _action_type(self, element_id: str, text: str):
-        if not self.page: raise ConnectionError("Нельзя печатать, браузер не открыт.")
-        selector = f"[data-ornold-id='{element_id}']"
-        # Здесь можно вернуть human_like_type
-        await self.page.locator(selector).type(text)
-
-    def _action_finish(self, result: str):
-        logger.info(f"Агент {self.task_id} завершает работу с результатом: {result}")
-        self.update_task_status("completed", result=result)
-        self.is_finished = True
-
-    # --- Вспомогательные методы ---
+        except Exception as e:
+            error_message = f"Ошибка во время выполнения LaVague: {e}"
+            logger.error(error_message)
+            self.update_task_status("error", status_reason=str(e))
     
     def update_task_status(self, status: str, status_reason: str = None, result: str = None):
+        """Обновляет статус задачи в Redis."""
         task_json = redis_client.get(f"task:{self.task_id}")
-        if not task_json: return
+        if not task_json:
+            logger.warning(f"Не удалось найти задачу {self.task_id} в Redis для обновления статуса.")
+            return
         
         task_data = json.loads(task_json)
         task_data['status'] = status

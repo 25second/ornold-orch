@@ -7,4 +7,7 @@ redis
 celery
 chromadb
 python-dotenv
-beautifulsoup4 
+beautifulsoup4
+lavague
+lavague-llms-openai
+lavague-drivers-playwright 

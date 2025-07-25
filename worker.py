@@ -1,13 +1,12 @@
 import shared.logging_config
 from celery import Celery
-from universal_agent.agent import UniversalAgent # Импортируем нового агента
-import asyncio
+from universal_agent.agent import LaVagueAgent # Импортируем нового агента
 import os
 
-# Получаем хост Redis из переменной окружения, по умолчанию 'localhost'
+# Получаем хост Redis из переменной окружения
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 
-# Настраиваем Celery. Используем Redis в качестве брокера и бэкенда для результатов.
+# Настраиваем Celery
 celery_app = Celery(
     'tasks',
     broker=f'redis://{REDIS_HOST}:6379/0',
@@ -15,14 +14,14 @@ celery_app = Celery(
 )
 
 @celery_app.task(name="worker.run_agent_task")
-def run_agent_task(task_id: str, goal: str, initial_browser_endpoints: list):
+def run_agent_task(task_id: str, goal: str, initial_browser_endpoints: list = None):
     """
-    Универсальная Celery-задача, которая инициализирует и запускает агента.
+    Celery-задача, которая инициализирует и запускает LaVague агента.
     """
-    agent = UniversalAgent(
+    agent = LaVagueAgent(
         task_id=task_id, 
         goal=goal,
-        initial_browser_endpoints=initial_browser_endpoints
+        browser_endpoints=initial_browser_endpoints
     )
-    asyncio.run(agent.run())
-    return f"Универсальный агент завершил работу над задачей {task_id}." 
+    agent.run()
+    return f"Агент LaVague завершил работу над задачей {task_id}." 
