@@ -130,20 +130,19 @@ class GemmaClient:
 Ты — мозг автономного универсального агента.
 Твоя главная цель: "{goal}"
 
-# Доступные действия (СТРОГО ТОЛЬКО ЭТИ!)
+# СТРОГО ДОСТУПНЫЕ ДЕЙСТВИЯ (НИКАКИХ ДРУГИХ!)
 1.  `{{ "action": "think", "text": "...", "reasoning": "..." }}`
-    - Используй, чтобы записать свои мысли, рассуждения или составить внутренний план.
 2.  `{{ "action": "browse", "url": "...", "reasoning": "..." }}`
-    - Используй, чтобы открыть новую страницу в браузере. Если браузер еще не открыт, агент попытается его запустить.
 3.  `{{ "action": "click", "element_id": "...", "reasoning": "..." }}`
-    - Кликнуть по элементу на странице. Используй `data-ornold-id` из `marked_html`.
 4.  `{{ "action": "type", "element_id": "...", "text": "...", "reasoning": "..." }}`
-    - Напечатать текст в поле ввода.
 5.  `{{ "action": "finish", "result": "...", "reasoning": "..." }}`
-    - Используй, когда главная цель полностью достигнута. В `result` кратко опиши итог.
 
-ВАЖНО: НЕ ИЗОБРЕТАЙ новые действия! Используй ТОЛЬКО те 5 действий, что указаны выше.
-Если видишь всплывающие окна (геолокация, уведомления, cookie) - просто кликни "Отклонить" или закрой их через существующие кнопки.
+ЗАПРЕЩЕНО создавать действия типа: show_geolocation_popup, allow_geolocation, dismiss_popup, accept_cookies, или любые другие!
+
+# Примеры правильных ответов:
+- Если видишь popup: `{{ "action": "click", "element_id": "123", "reasoning": "Кликаю на кнопку 'Отклонить' чтобы закрыть popup" }}`
+- Если нужно найти элемент: `{{ "action": "think", "text": "Ищу поле поиска на странице", "reasoning": "Анализирую HTML для поиска нужного элемента" }}`
+- Если видишь поле ввода: `{{ "action": "type", "element_id": "456", "text": "мой запрос", "reasoning": "Ввожу текст в найденное поле" }}`
 
 # Контекст
 Твоя история действий (последние 10): {history[-10:]}
@@ -151,8 +150,8 @@ class GemmaClient:
 {json.dumps(perception, indent=2, ensure_ascii=False)}
 
 # Задача
-Проанализируй всё вышесказанное и определи **одно** следующее действие.
-Твой ответ должен быть ТОЛЬКО JSON-объектом одного из указанных выше действий. Добавь поле `reasoning` для объяснения своего выбора.
+Определи **одно** следующее действие из 5 разрешенных выше.
+Ответ СТРОГО в формате JSON без дополнительного текста:
 """
         logger.info("Запрос к LLM (формат 'prompt')...")
         
@@ -170,7 +169,22 @@ class GemmaClient:
                 # _run_and_poll_task возвращает нам `output`, так что начинаем с [0]
                 content = llm_response[0]['choices'][0]['text']
                 cleaned_content = content.strip().replace("```json", "").replace("```", "")
-                return json.loads(cleaned_content)
+                parsed_action = json.loads(cleaned_content)
+                
+                # Проверяем, что действие из разрешенного списка
+                allowed_actions = ["think", "browse", "click", "type", "finish"]
+                action_type = parsed_action.get("action")
+                
+                if action_type not in allowed_actions:
+                    logger.warning(f"LLM предложил неразрешенное действие '{action_type}'. Заменяю на 'think'.")
+                    return {
+                        "action": "think", 
+                        "text": f"LLM ошибочно предложил действие '{action_type}'. Нужно выбрать из: {allowed_actions}",
+                        "reasoning": "Исправляю ошибку LLM"
+                    }
+                
+                return parsed_action
+                
             except (json.JSONDecodeError, KeyError, IndexError) as e:
                 logger.error(f"Не удалось распарсить JSON из ответа LLM: {e}. Ответ: {content}")
                 return {"action": "think", "text": f"Ошибка парсинга ответа от LLM: {content}"}
